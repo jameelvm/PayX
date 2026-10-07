@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Only what crosses a service boundary lives here: DTOs, event schemas,
+       the Money value type (Module 1.7). Deliberately no package or
+       framework references — every service can depend on it without
+       pulling in infrastructure. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
