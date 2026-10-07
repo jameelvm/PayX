@@ -5,6 +5,9 @@ explains what was built, why, how to verify it, and the design talking points
 each phase demonstrates. See `DESIGN.md` for the decision register and
 `PROGRESS.md` for live build state.
 
+**Start here for the big picture:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md),
+with the component map, one payment step by step, and the payment state machine.
+
 ## Phase 0 — Design
 
 Nothing runnable yet. The design is in `DESIGN.md`; the one idea to carry

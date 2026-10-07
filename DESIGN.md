@@ -29,6 +29,9 @@ estimate error, then say what it means for the architecture.)
 
 ## Architecture overview
 
+Rendered diagrams (Mermaid, viewable on GitHub): [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+The text sketches below are the quick-reference versions.
+
 ### Component diagram
 
 ```
