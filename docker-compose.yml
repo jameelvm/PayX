@@ -1,0 +1,36 @@
+name: payx
+
+# Local stand-in for the production topology in the design doc. Grows one
+# module at a time — see PROGRESS.md for which containers exist so far.
+#
+#   doc component                    -> container here
+#   ---------------------------------------------------------------
+#   "associated database" per service -> postgres (one database + one role each)
+
+services:
+  # ---------------------------------------------------------------- platform
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: payx-postgres
+    environment:
+      # Admin account: used only by the init script and by you in psql.
+      # No service ever connects as this user — each gets its own role.
+      POSTGRES_USER: payx_admin
+      POSTGRES_PASSWORD: payx_admin
+      POSTGRES_DB: payx_admin
+    ports:
+      # 5434, not 5432 — the sibling JameX stack already publishes 5432 on the
+      # host. Container-to-container traffic still uses 5432.
+      - "5434:5432"
+    volumes:
+      - payx-pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payx_admin -d payx_admin"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  payx-pgdata:
