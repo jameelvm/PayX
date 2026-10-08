@@ -6,6 +6,9 @@ name: payx
 #   doc component                    -> container here
 #   ---------------------------------------------------------------
 #   "associated database" per service -> postgres (one database + one role each)
+#   risk check state (velocity)       -> redis
+#   card vault, risk decisions        -> localstack DynamoDB + KMS
+#   PSP end-of-day settlement file    -> localstack S3
 
 services:
   # ---------------------------------------------------------------- platform
@@ -31,6 +34,48 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: payx-redis
+    # noeviction, not allkeys-lru (SuggestX's choice): there Redis was a pure
+    # cache and evicting a key just meant a miss. Here it will hold Risk's
+    # velocity counters — silently evicting one would reset a card's
+    # "payments in the last hour" to zero, which is a fraud hole. A full Redis
+    # should fail loudly (writes rejected) so Risk's fallback kicks in.
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      # 6381 — JameX publishes 6379, SuggestX 6380.
+      - "6381:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: payx-localstack
+    environment:
+      SERVICES: s3,dynamodb,kms
+      AWS_DEFAULT_REGION: us-east-1
+      DEBUG: "0"
+      # Personal token from the gitignored .env, same as the sibling projects.
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:-}
+    ports:
+      # 4568 on the host — JameX publishes 4566, SuggestX 4567. Inside the
+      # container (and to other containers) it is always 4566.
+      - "4568:4566"
+    volumes:
+      - ./infra/localstack/init:/etc/localstack/init/ready.d:ro
+    healthcheck:
+      # Healthy only once the bootstrap script has finished: the KMS alias is
+      # the last thing it creates.
+      test: ["CMD-SHELL", "awslocal kms describe-key --key-id alias/payx-card-vault >/dev/null || exit 1"]
+      interval: 6s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
 
 volumes:
   payx-pgdata:

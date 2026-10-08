@@ -47,14 +47,23 @@ says where the build stopped and what happens next. Update *Current state* and
 (the schema/detailed-design figures are blank in the PDF export, so the
 storage schema in `DESIGN.md` is inferred from the APIs and text). Stack,
 service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
-**Phase 1 — Modules 1.1–1.2 done, verified.**
+**Phase 1 — Modules 1.1–1.3 done, verified.**
 - 1.1 solution skeleton: `dotnet build PayX.slnx` green; `GET :7082/api/ping`
   → 200; unknown route → 404 `application/problem+json`. Committed.
 - 1.2 Postgres (`payx-postgres`, host port 5434): six databases, each owned by
   its own login role, `CONNECT` revoked from `PUBLIC`. Verified: each role
   connects to its own database; `payx_payments` → `payx_ledger` and
   `payx_identity` → `payx_payments` are both refused with `permission denied
-  … CONNECT privilege`. Awaiting owner review, then commit.
+  … CONNECT privilege`. Committed.
+- 1.3 Redis (`payx-redis`, 6381, `noeviction`) + LocalStack (`payx-localstack`,
+  4568, `s3,dynamodb,kms`) with an idempotent bootstrap script: S3
+  `payx-settlement-files`, DynamoDB `payx-card-vault` / `payx-risk-decisions`,
+  KMS `alias/payx-card-vault`. Verified: all resources listed, KMS
+  encrypt → decrypt round trip of a test card number, script re-runs cleanly
+  on restart. **Found:** LocalStack state is not persisted (no paid
+  persistence) — a restart recreates everything, including a *new* KMS key
+  under the same alias. Harmless now; matters in Phase 3 (anything encrypted
+  before a restart becomes undecryptable). Awaiting owner review, then commit.
 
 ## Phase plan
 
@@ -117,6 +126,6 @@ when we get to them — the list shows the intended granularity, not a contract.
 
 ## Next up
 
-**Phase 1, Module 1.3 — Redis + LocalStack (S3, DynamoDB, KMS) + init script.**
+**Phase 1, Module 1.4 — Kafka (KRaft) + Kafka UI; topics, partitions, keys and offsets from the CLI, before any code touches Kafka.**
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.
