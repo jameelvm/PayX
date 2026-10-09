@@ -9,6 +9,7 @@ name: payx
 #   risk check state (velocity)       -> redis
 #   card vault, risk decisions        -> localstack DynamoDB + KMS
 #   PSP end-of-day settlement file    -> localstack S3
+#   Kafka ("transaction completion")  -> kafka (single KRaft broker) + kafka-ui
 
 services:
   # ---------------------------------------------------------------- platform
@@ -76,6 +77,66 @@ services:
       timeout: 5s
       retries: 40
       start_period: 20s
+
+  kafka:
+    image: apache/kafka:4.1.0
+    container_name: payx-kafka
+    environment:
+      # KRaft mode: Kafka stores its own cluster metadata — no ZooKeeper
+      # (Kafka 4 removed it). This one process is both broker and controller.
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Two client listeners, because a client is told to reconnect to the
+      # *advertised* address after its first contact:
+      #   INTERNAL kafka:9092      — what other containers use
+      #   EXTERNAL localhost:9094  — what your host (and VS debugger) uses
+      # Advertise only one and the other side connects once, then fails.
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      # Single broker, so Kafka's own internal topics can't be replicated.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Topics are created deliberately (kafka-init below), never by a typo
+      # in a producer's topic name.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      - "9094:9094"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:9092 >/dev/null 2>&1"]
+      interval: 6s
+      timeout: 10s
+      retries: 30
+      start_period: 15s
+
+  kafka-init:
+    # One-shot: creates the topics, then exits. Services that need Kafka wait
+    # for this to have *completed successfully*, not just for the broker.
+    image: apache/kafka:4.1.0
+    container_name: payx-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./infra/kafka:/scripts:ro
+    entrypoint: ["bash", "/scripts/create-topics.sh"]
+    restart: "no"
+
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:latest
+    container_name: payx-kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: payx-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "7090:8080"
 
 volumes:
   payx-pgdata:

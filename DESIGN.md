@@ -45,7 +45,7 @@ The text sketches below are the quick-reference versions.
                                │  ▲  │
              authorize/capture │  │  │ outbox relay
              (Idempotency-Key) ▼  │  ▼
-                      PSP Simulator   Kafka ── payx.payments.* ──► Ledger (PG, append-only,
+                      PSP Simulator   Kafka ─── payx.payments ──► Ledger (PG, append-only,
                   (PSP+network+issuer)  ▲                           double-entry + wallets)
                      │   │ webhooks ────┘(via Payment)              Dispute, Notifications
                      │   └── EOD settlement file ──► S3 ──► Reconciliation ◄── Ledger export
@@ -81,7 +81,7 @@ job asks the PSP (by the same idempotency key) what actually happened.
 | 1 | Service-oriented, one store per service | Proposed | Same discipline as JameX/SuggestX; makes the saga boundaries real | Modular monolith (would hide every distributed-failure lesson) |
 | 2 | Postgres for payments, ledger, identity, recon, disputes | Proposed | Money needs ACID, constraints, serializable transactions; ~1,400 TPS is easy for PG | DynamoDB for payments — possible (conditional writes), but double-entry invariants and history queries are far more natural in SQL |
 | 3 | **Orchestrated saga** in PaymentService (explicit state machine), events for side effects | Proposed | Payment flow is linear with a clear owner; orchestration keeps the state in one inspectable row | Pure choreography (state smeared across services); Temporal/Step Functions — see §4, possible later phase |
-| 4 | **Kafka** (KRaft) for the event backbone, partition key = `payment_id` | Proposed | Doc names Kafka; per-payment ordering; replayable log (rebuild wallets, re-run recon); new tech vs JameX's SNS/SQS | SNS→SQS FIFO (works, but no replay; already learned in JameX) |
+| 4 | **Kafka** (KRaft) for the event backbone: **one topic per aggregate** (`payx.payments`, 6 partitions), message key = `payment_id`, event type inside the message | Proposed (topic shape verified in Module 1.4) | Doc names Kafka. Kafka orders only *within a partition*: same key → same partition → a payment's events stay in order. One topic per event type (`…authorized`, `…captured`) would be separate logs and the Ledger could read a capture before its authorization. Replayable log (rebuild wallets, re-run recon); new tech vs JameX's SNS/SQS | SNS→SQS FIFO (works, but no replay; already learned in JameX); topic per event type (loses per-payment ordering) |
 | 5 | **Transactional outbox** + relay | Proposed | Closes the dual-write gap between "row updated" and "event published" | Publish-then-commit / commit-then-publish (each loses or invents events on crash); Debezium CDC (heavier — mention as prod option) |
 | 6 | **Idempotency keys** persisted in PaymentService's PG, Stripe-style (request hash, in-progress lock, stored response) | Proposed | Doc's answer to double-charge; storing the *response* means a retry returns the identical result | Redis-only keys (lost on eviction → double charge); dedupe by amount+card+time (false positives) |
 | 7 | Idempotency propagated to the PSP (`{payment_id}:{operation}:{attempt-safe-key}`) | Proposed | Our retry after a PSP timeout must not create a second authorization | Relying on our own dedupe only — doesn't help when the PSP did the work |
@@ -95,6 +95,73 @@ job asks the PSP (by the same idempotency key) what actually happened.
 | 15 | Resilience via Polly v8 (`Microsoft.Extensions.Http.Resilience`) — retry w/ exponential backoff + jitter (only on idempotent/keyed calls), per-attempt + total timeouts, circuit breaker | Proposed | Doc's retry/timeout/fallback; idiomatic .NET | Hand-rolled retry loops |
 | 16 | OpenTelemetry tracing across HTTP **and** Kafka hops → Aspire dashboard | Proposed — **addition** | A payment touches 6+ services; one trace per payment is how you debug a saga | Log correlation IDs only |
 | 17 | Money as `long` minor units + currency | Proposed | No float rounding; currency explicit everywhere | `decimal` amounts (fine in C#, ambiguous across JSON/JS) |
+
+### Decision 4 in detail: why Kafka, not SNS + SQS
+
+**SNS + SQS could run PayX.** SNS FIFO fanning out to SQS FIFO queues gives
+per-payment ordering via `MessageGroupId`. Kafka was chosen because of one
+structural difference: **SQS is a queue, Kafka is a log.**
+
+```
+SQS (queue):  message → consumer → delete           gone once processed
+Kafka (log):  message → appended at offset N        kept for the retention period (7 days here);
+              each consumer group keeps its own bookmark (offset) into the same log
+```
+
+**What Kafka does better for a payment system**
+
+| Need | Kafka | SNS + SQS |
+|---|---|---|
+| Replay history | Reset a group's offset and re-read the retained events: rebuild the Ledger after a bug, re-run reconciliation | Not possible: messages are deleted once processed. Needs a separate archive (e.g. SNS → Firehose → S3) |
+| Per-payment ordering with parallelism | Key = `payment_id` → same partition → in order; 6 partitions processed in parallel | SQS FIFO + `MessageGroupId` works too, with tighter throughput limits |
+| New consumers later | A new consumer group can start from the earliest retained event (`auto.offset.reset=earliest`) and process the history, without moving any other group's offsets | A new subscription is equally easy (no publisher change either, when publishing via SNS), but it **only sees events from subscription time on**: past events would need a hand-written backfill |
+| Fan-out | Any number of consumer groups read the same log | One SQS queue per subscriber |
+| Audit trail | The log is itself an ordered record of what happened | Nothing remains after processing |
+
+**What SNS + SQS does better (the trade-off we accept)**
+
+| SQS advantage | What it costs PayX on Kafka |
+|---|---|
+| Per-message ack: a failed message reappears after its visibility timeout while the rest keep flowing | Kafka commits an offset per partition, so **one bad message blocks its whole partition** until skipped. Handled by a dead-letter topic (Module 6.6) |
+| Built-in dead-letter queue (`maxReceiveCount`) | Built by hand (6.6) |
+| Fully serverless, nothing to size | Brokers, partitions and replication to plan (MSK Serverless reduces this) |
+| Pay per message, near zero when idle | MSK has a baseline cost even when idle |
+| FIFO dedup window (5 minutes) | Consumers dedupe themselves (`processed_events`, 7.4) |
+
+**Verdict:** for a ledger-backed money system, being able to replay and audit
+is worth the loss of per-message convenience. For a fire-and-forget side
+effect ("email the receipt"), SQS would be the better tool.
+
+**What PayX uses Kafka for.** All of it runs *after* the customer has their
+response. Kafka is never on the synchronous payment path.
+
+| # | Function | Producer → consumer | Module |
+|---|---|---|---|
+| 1 | Ledger posting: authorize/capture/refund/void → double-entry postings | Payment (outbox relay) → Ledger | 6.2, 7.3 |
+| 2 | Guaranteed completion: offset committed only after the ledger's DB commit (doc ch.2, "Transaction completion") | Ledger consumer | 7.3 |
+| 3 | Merchant balances (pending/available) updated in the same transaction as the postings | Ledger | 7.5 |
+| 4 | Refund and dispute reversals | Dispute → Ledger | 9.1 |
+| 5 | Poison messages moved to `payx.payments.dlq` so the partition keeps moving | Ledger → DLQ topic | 6.6 |
+| 6 | Replay drill: reset offsets, rebuild Ledger state | Ops | 11 |
+| 7 | Future consumers (notifications, analytics) with no change to Payment | — | optional |
+
+Not on Kafka: Payment → Risk and Payment → Vault → PSP (synchronous HTTP, the
+customer is waiting), PSP webhooks (HTTP), the settlement file (S3).
+
+**AWS options for this role**
+
+| AWS service | What it is | Fit for PayX |
+|---|---|---|
+| **Amazon MSK** (provisioned, or Express brokers) | Managed Apache Kafka: AWS runs the brokers, you choose size and count | **The production target.** The same Kafka protocol as the local container, so the code doesn't change, only the bootstrap servers and IAM auth (SASL with the AWS MSK IAM signer) |
+| **Amazon MSK Serverless** | Kafka with no broker sizing; capacity scales automatically | Good fit at ~1,400 TPS; trades some configuration control and per-cluster limits for no capacity planning |
+| **Amazon Kinesis Data Streams** | AWS's own log service. Shards ≈ partitions, partition key ≈ message key, retention 24 h by default and extendable up to 365 days, consumers checkpoint via KCL (in DynamoDB) | The closest AWS-native equivalent: same log model, per-key ordering, replay. Different API (AWS SDK, not the Kafka protocol) and per-shard throughput limits. A valid alternative if you want to stay fully AWS-native |
+| **Amazon EventBridge** | Event bus with rule-based routing; has *archive and replay* | Strong for routing events between many services or SaaS integrations; no partition ordering guarantees, so not for ledger posting |
+| **SNS + SQS (FIFO)** | Pub/sub fan-out to queues | Covered above: workable, but no replay |
+
+**Why Kafka in Docker locally, not LocalStack:** the container runs real
+Apache Kafka, which is exactly what MSK runs, so local behaviour matches
+production. (LocalStack emulates Kinesis on its free tier, so Kinesis is
+also a one-module experiment if we ever want to compare the two.)
 
 ## §2 Failure-mode table (seeded — verified per phase)
 

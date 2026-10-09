@@ -31,7 +31,7 @@ flowchart LR
         Vault["Vault<br/>DynamoDB + KMS"]
         Payment["Payment<br/>Postgres + outbox"]
         Risk["Risk<br/>Redis + DynamoDB"]
-        Kafka[["Kafka<br/>payx.payments.*"]]
+        Kafka[["Kafka<br/>payx.payments · 6 partitions"]]
         Ledger["Ledger + wallets<br/>Postgres, append-only"]
         Dispute["Dispute<br/>Postgres"]
         Recon["Reconciliation<br/>Postgres"]

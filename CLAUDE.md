@@ -150,7 +150,9 @@ App/
   brand. Logs are scrubbed.
 - **Layered inside each service**: `Api/` → `Services/` → `Repositories/` →
   `Domain/`; workers get `Jobs/`. Controllers, not minimal APIs.
-- AWS resources are named `payx-*`; Kafka topics `payx.<domain>.<event>`.
+- AWS resources are named `payx-*`. Kafka topics are **one per aggregate**
+  (`payx.payments`), never one per event type, with the event type inside the
+  message and the message key = the aggregate id — see `DESIGN.md` decision 4.
 - Anything that demonstrates a design-doc concept carries a comment naming the
   chapter/section it comes from.
 - Batch cadences (settlement, reconciliation) are configurable and set short
@@ -164,4 +166,4 @@ Shifted to coexist with JameX (8080-8090, 3100, 5432, 6379, 4566) and SuggestX
 web `3020`, gateway `7080`, identity `7081`, payment `7082`, risk `7083`,
 vault `7084`, ledger `7085`, reconciliation `7086`, dispute `7087`,
 psp-simulator `7088`, Postgres `5434`, Redis `6381`, LocalStack `4568`,
-Kafka `9094` (host listener), Kafka UI `7090`, Aspire dashboard `18888`.
+Kafka `9094` (host listener; containers use `kafka:9092`), Kafka UI `7090`, Aspire dashboard `18888`.
