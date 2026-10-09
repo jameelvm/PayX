@@ -74,6 +74,93 @@ job asks the PSP (by the same idempotency key) what actually happened.
 - **payx_recon**: `runs(id, settlement_date, file_key, status, matched, mismatched)`, `discrepancies(id, run_id, payment_id, kind[missing_in_ledger|missing_in_psp|amount_mismatch|status_mismatch], ledger_amount, psp_amount, resolution)`
 - **payx_disputes**: `disputes(id, payment_id, psp_dispute_id, reason, amount_minor, status, evidence_due, created_at)`
 
+### Production topology on AWS (no API Gateway)
+
+Everything above runs locally in Docker Compose. This is the same
+architecture deployed to AWS. The entry point is an **ALB in front of our
+own YARP Gateway**; Amazon API Gateway is not needed (decision 19 says why
+it was not chosen).
+
+```
+                                   Internet
+                                      │
+                           Route 53  (pay.example.com)
+                                      │
+                           AWS WAF    (bots, injection, rate rules)
+                                      │
+┌──────────────────────────── VPC · 3 Availability Zones ────────────────────────────┐
+│                                     │                                               │
+│  PUBLIC SUBNETS                     ▼                                               │
+│     ┌─────────────── ALB · HTTPS (ACM certificate) ───────────────┐   NAT Gateway ──┼──► real PSP
+│     │   health check: /health/ready on every Gateway task         │        ▲        │    (Stripe / Adyen)
+│     └──────────────────────────────┬──────────────────────────────┘        │        │
+│                                    │                                       │        │
+│  PRIVATE SUBNETS · app             ▼                                       │        │
+│               ECS Fargate · Gateway (YARP) × 2–3 tasks                     │        │
+│                                    │                                       │        │
+│                     ECS Service Connect (Cloud Map discovery)              │        │
+│        ┌───────────┬───────────────┼───────────────┬───────────────┐       │        │
+│        ▼           ▼               ▼               ▼               ▼       │        │
+│    Identity     Payment ──────► Risk            Vault ─────────────────────┘        │
+│                    │  └──────────────────────────► (card ops)                       │
+│                    │ outbox relay                                                   │
+│                    ▼                                                                │
+│  PRIVATE SUBNETS · data                                                             │
+│     Amazon MSK (Kafka, 3 brokers) ──► Ledger      Dispute ──► Ledger                │
+│     RDS PostgreSQL / Aurora, Multi-AZ (one database + role per service)             │
+│     ElastiCache Redis (Risk velocity counters)                                      │
+│                                                                                     │
+│  VPC endpoints (traffic to AWS APIs never leaves AWS):                              │
+│     DynamoDB (Vault, Risk) · S3 (settlement files → Reconciliation)                 │
+│     KMS (Vault) · Secrets Manager (all services)                                    │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+Two layers of load balancing (see Module 1.6):
+
+| Layer | Balances | Local | AWS |
+|---|---|---|---|
+| Edge | client → Gateway instances | none (one Gateway) | **ALB**, across availability zones |
+| Service | Gateway → service instances | YARP clusters, hard-coded ports | YARP + **ECS Service Connect** (discovered addresses) |
+
+Service-to-service calls (Payment → Risk, Payment → Vault) never go back
+through the Gateway: north–south traffic enters via ALB → Gateway, east–west
+traffic uses Service Connect directly.
+
+**Local → AWS, piece by piece**
+
+| Local (Docker Compose) | AWS | Code change? |
+|---|---|---|
+| — (one Gateway, no edge) | ALB + ACM certificate + WAF | None |
+| Gateway (YARP) on `localhost:7080` | ECS Fargate service, 2–3 tasks | Destinations from service discovery instead of hard-coded ports |
+| Hard-coded `7082` / `7092` | ECS Service Connect / Cloud Map, e.g. `http://payment:8080` | Config only |
+| Each service | ECS Fargate service each, with auto scaling | None |
+| Postgres container, 6 databases | RDS PostgreSQL / Aurora, Multi-AZ (one cluster with 6 databases, or one instance per service) | Connection strings only |
+| Per-service roles + dev passwords | Same roles; passwords in Secrets Manager (or IAM database authentication) | Read the secret at startup |
+| Redis container | ElastiCache for Redis (Multi-AZ, encryption in transit) | Connection string |
+| LocalStack DynamoDB, S3, KMS | Real DynamoDB, S3, KMS | **None**: same AWS SDK, drop the endpoint override |
+| Kafka container | Amazon MSK (3 brokers over 3 AZs, or MSK Serverless) | Bootstrap servers + IAM auth (MSK IAM signer, a few lines of client config) |
+| PSP simulator | ECS service in staging; the real PSP via NAT Gateway in production | Swap the PSP adapter behind its interface |
+| `/health/ready`, `/health/live` | ALB target group / YARP use ready; ECS container health check uses live | None |
+| Console logs | CloudWatch Logs; traces via ADOT (OpenTelemetry) → X-Ray / CloudWatch | Config |
+
+**Security layers**
+
+| Concern | AWS mechanism |
+|---|---|
+| Only the ALB can reach the Gateway | Security groups: ALB SG → Gateway SG on 8080 only |
+| A service can't reach another's database | Security groups (Payment SG → its RDS only) **plus** the per-service database roles from Module 1.2 |
+| Nothing internal is on the internet | Services and stores in private subnets; only the ALB is public |
+| AWS API calls stay inside AWS | VPC endpoints for DynamoDB, S3, KMS, Secrets Manager |
+| Card data encrypted | KMS-encrypted Vault, TLS everywhere, encryption at rest on RDS / MSK / ElastiCache |
+| Least privilege for AWS access | One IAM task role per service, e.g. only Vault's role may `kms:Decrypt` with the vault key |
+| Audit | CloudTrail (who used KMS, when), alongside the ledger |
+
+**Build and deploy:** AWS CDK in C# (or Terraform) for infrastructure, images
+in ECR, GitHub Actions for CI/CD with rolling ECS deploys gated on readiness.
+A small always-on setup is roughly $400–600/month (MSK, RDS Multi-AZ and the
+NAT Gateway dominate); for learning, deploy, run the drills and tear it down.
+
 ## §1 Decision register
 
 | # | Decision | Status | Why | Alternative rejected |
@@ -95,6 +182,8 @@ job asks the PSP (by the same idempotency key) what actually happened.
 | 15 | Resilience via Polly v8 (`Microsoft.Extensions.Http.Resilience`) — retry w/ exponential backoff + jitter (only on idempotent/keyed calls), per-attempt + total timeouts, circuit breaker | Proposed | Doc's retry/timeout/fallback; idiomatic .NET | Hand-rolled retry loops |
 | 16 | OpenTelemetry tracing across HTTP **and** Kafka hops → Aspire dashboard | Proposed — **addition** | A payment touches 6+ services; one trace per payment is how you debug a saga | Log correlation IDs only |
 | 17 | Money as `long` minor units + currency | Proposed | No float rounding; currency explicit everywhere | `decimal` amounts (fine in C#, ambiguous across JSON/JS) |
+| 18 | Gateway **fails open** when every instance of a service is unhealthy (YARP `HealthyOrPanic`) | Accepted (verified in Module 1.6) | Matches AWS ALB, the production target. If every instance looks unhealthy, a broken health check is a likelier cause than every instance failing at once; failing closed would turn that into a full outage. Instances whose database really is down still fail fast with their own 503 before any money moves | Fail closed (`HealthyAndUnknown`): Gateway returns 503 itself. Cleaner when the outage is real, but a bad probe path or a probe timeout set too tight takes the whole service offline |
+| 19 | Self-hosted **YARP Gateway behind an ALB**, not Amazon API Gateway | Accepted | Learning value (routing, balancing, health and fail-open are visible and testable, as decision 18 showed); identical behaviour locally and on AWS; custom C# edge logic (e.g. require `Idempotency-Key` on POST, scrub card data from logs); at the doc's ~1.5B requests/month, per-request pricing (~$1/M HTTP API, ~$3.50/M REST) costs far more than an ALB plus a few containers | Amazon API Gateway (HTTP API + VPC Link + Cloud Map): fully managed, built-in JWT authorizers, throttling, usage plans and API keys, WAF. The better choice for low or spiky volume, serverless/Lambda backends, or a public merchant API with per-client keys |
 
 ### Decision 4 in detail: why Kafka, not SNS + SQS
 

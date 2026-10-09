@@ -45,14 +45,14 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 6 / 67 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 7 / 67 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
 | Phase | Name | Doc concept | Done | Status |
 |---|---|---|---|---|
 | 0 | [Design](#phase-0-design) | requirements, estimates (+ corrections), HLD | 1 / 2 | 🔄 |
-| 1 | [Local substrate](#phase-1-local-substrate) | — | 5 / 7 | 🔄 |
+| 1 | [Local substrate](#phase-1-local-substrate) | — | 6 / 7 | 🔄 |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 0 / 4 | ⬜ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 0 / 6 | ⬜ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 0 / 7 | ⬜ |
@@ -80,7 +80,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 1.3 | Redis + LocalStack (S3, DynamoDB, KMS) + bootstrap script | local AWS emulation, same SDK as prod |
 | ✅ | 1.4 | Kafka (KRaft) + Kafka UI; topics, keys, partitions, offsets from the CLI | log vs queue, per-key ordering |
 | ✅ | 1.5 | ServiceDefaults: health checks + config wiring | liveness vs readiness |
-| ⬜ | 1.6 | Gateway with YARP routing | single entry point |
+| ✅ | 1.6 | Gateway with YARP routing | single entry point |
 | ⬜ | 1.7 | `Money` value type + tests | integer minor units |
 
 ### Phase 2: Identity
@@ -200,7 +200,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 (the schema/detailed-design figures are blank in the PDF export, so the
 storage schema in `DESIGN.md` is inferred from the APIs and text). Stack,
 service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
-**Phase 1 — Modules 1.1–1.5 done, verified.**
+**Phase 1 — Modules 1.1–1.6 done, verified.**
 - 1.1 solution skeleton: `dotnet build PayX.slnx` green; `GET :7082/api/ping`
   → 200; unknown route → 404 `application/problem+json`. Committed.
 - 1.2 Postgres (`payx-postgres`, host port 5434): six databases, each owned by
@@ -234,6 +234,16 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   `docker stop payx-postgres` → live 200, ready 503 naming
   `postgres:Payments`; restarted → ready 200 again with no app restart.
   Committed.
+- 1.6 Gateway (YARP, port 7080): route `/api/payments/{**rest}` → cluster
+  `payment` with two destinations (7082, 7092), round robin, active health
+  checks on `/health/ready` every 5 s, unhealthy after 2 failures,
+  `AvailableDestinationsPolicy: HealthyOrPanic` (fail open, decision 18).
+  Ping moved to `/api/payments/ping` and reports which port answered.
+  Verified: round robin alternates 7092/7082; killing 7092 gives 502 on its
+  turns for ~10 s, then all traffic goes to 7082; with Postgres down (all
+  unhealthy) `HealthyAndUnknown` → Gateway 503 every time, `HealthyOrPanic`
+  → routes anyway (200 from the live instance, 502 from the dead one).
+  Committed, together with the AWS production topology and decision 19 in DESIGN.md.
 
 ## Environment notes
 
@@ -243,6 +253,6 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 1, Module 1.6 — Gateway with YARP routing to the Payment service (single entry point).**
+**Phase 1, Module 1.7 — `Money` value type + tests (integer minor units + currency).**
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.
