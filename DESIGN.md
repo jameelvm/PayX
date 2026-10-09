@@ -199,6 +199,24 @@ also a one-module experiment if we ever want to compare the two.)
 - *Buy button hit many times?* Idempotency key generated once per checkout
   session, disabled button client-side, server dedupe as the real guarantee.
 
+- *Liveness vs readiness: what is each for?* (Module 1.5) Liveness = "is the
+  process stuck?" and the orchestrator **restarts** it on failure, so it runs
+  no dependency checks. Readiness = "can it take work now?" and the load
+  balancer **stops routing** to it on failure, without restarting it. Never
+  put a database in liveness (a blip restarts every instance at once: a
+  restart storm). Readiness checks only what the instance can't work without
+  (its own store), never other services (one failure would cascade
+  "not ready" up the whole call chain; use timeouts/breakers/fallbacks).
+- *Database down: does the load balancer still send traffic?* If only some
+  instances can't reach it, no: readiness removes them. If the database
+  itself is down, every instance fails together and there is nowhere better
+  to route: AWS ALB **fails open** (sends to all targets anyway), Kubernetes
+  has no endpoints (immediate 503). Either way the protection is the service
+  failing fast with a 503 before any money moves, plus idempotent client
+  retries. Health checks are a routing optimisation, not a correctness
+  guarantee, and detection lag (interval × threshold) means some requests
+  always hit a broken instance first.
+
 ## §4 Open questions / deferred
 
 - Temporal or AWS Step Functions as the saga engine — a possible late phase to

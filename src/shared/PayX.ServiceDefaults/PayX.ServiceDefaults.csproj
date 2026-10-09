@@ -15,4 +15,8 @@
     <ProjectReference Include="..\PayX.Contracts\PayX.Contracts.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+  </ItemGroup>
+
 </Project>
