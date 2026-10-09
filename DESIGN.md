@@ -181,9 +181,26 @@ NAT Gateway dominate); for learning, deploy, run the drills and tear it down.
 | 14 | **PSP Simulator** with test cards and failure injection | Proposed | Can't demo timeout-after-success or duplicate webhooks against a real sandbox on demand | Stripe test mode (real, but can't inject the failures the doc is about — could be an adapter later) |
 | 15 | Resilience via Polly v8 (`Microsoft.Extensions.Http.Resilience`) — retry w/ exponential backoff + jitter (only on idempotent/keyed calls), per-attempt + total timeouts, circuit breaker | Proposed | Doc's retry/timeout/fallback; idiomatic .NET | Hand-rolled retry loops |
 | 16 | OpenTelemetry tracing across HTTP **and** Kafka hops → Aspire dashboard | Proposed — **addition** | A payment touches 6+ services; one trace per payment is how you debug a saga | Log correlation IDs only |
-| 17 | Money as `long` minor units + currency | Proposed | No float rounding; currency explicit everywhere | `decimal` amounts (fine in C#, ambiguous across JSON/JS) |
+| 17 | Money as a `sealed record class`: `long` minor units + ISO-4217 currency, capped at ±(2^53 − 1) | Accepted (Module 1.7) | No float rounding; currency explicit everywhere; per-currency decimals (JPY 0, KWD 3). A class, not a struct, so `default(Money)` and deserializers can't create one with a null currency. The cap keeps every amount exact in a JavaScript `Number` (JSON is parsed as doubles) | `decimal` (no currency, parsed as a double by JS); `record struct` (the `default` / hidden-constructor hole, hit in 1.7); amounts as JSON strings (avoids the cap, but every client must parse them) |
 | 18 | Gateway **fails open** when every instance of a service is unhealthy (YARP `HealthyOrPanic`) | Accepted (verified in Module 1.6) | Matches AWS ALB, the production target. If every instance looks unhealthy, a broken health check is a likelier cause than every instance failing at once; failing closed would turn that into a full outage. Instances whose database really is down still fail fast with their own 503 before any money moves | Fail closed (`HealthyAndUnknown`): Gateway returns 503 itself. Cleaner when the outage is real, but a bad probe path or a probe timeout set too tight takes the whole service offline |
 | 19 | Self-hosted **YARP Gateway behind an ALB**, not Amazon API Gateway | Accepted | Learning value (routing, balancing, health and fail-open are visible and testable, as decision 18 showed); identical behaviour locally and on AWS; custom C# edge logic (e.g. require `Idempotency-Key` on POST, scrub card data from logs); at the doc's ~1.5B requests/month, per-request pricing (~$1/M HTTP API, ~$3.50/M REST) costs far more than an ALB plus a few containers | Amazon API Gateway (HTTP API + VPC Link + Cloud Map): fully managed, built-in JWT authorizers, throttling, usage plans and API keys, WAF. The better choice for low or spiky volume, serverless/Lambda backends, or a public merchant API with per-client keys |
+
+**Decision 17 notes: known limits of `Money`, deliberately left for later**
+
+- **Allocation remainder is a business rule.** `Allocate` gives leftover
+  minor units to the first parts. Real options (platform keeps it, largest
+  share gets it, rotate) must be an explicit decision when multi-seller
+  payouts land in Phase 7. `Allocate` also only splits *equally*; orders are
+  split *by ratio* (seller prices minus fees), so a ratio-based `Allocate`
+  with the same never-lose-a-cent technique is needed then.
+- **Currency table is a stub.** Six hard-coded currencies. Production loads
+  the full, maintained ISO-4217 list (currencies are added, retired, and
+  occasionally change their number of decimals).
+- **No FX conversion.** `Money` only refuses to *mix* currencies.
+  Conversion needs an exchange rate with a source and timestamp, a written
+  rounding policy, the rate recorded in the ledger for audit, and usually a
+  spread posted as its own entry. Out of scope (§4); it would be its own
+  `ExchangeRate` type and module.
 
 ### Decision 4 in detail: why Kafka, not SNS + SQS
 

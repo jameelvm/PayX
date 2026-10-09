@@ -8,4 +8,7 @@
     <Project Path="src/shared/PayX.Contracts/PayX.Contracts.csproj" />
     <Project Path="src/shared/PayX.ServiceDefaults/PayX.ServiceDefaults.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PayX.Contracts.Tests/PayX.Contracts.Tests.csproj" />
+  </Folder>
 </Solution>

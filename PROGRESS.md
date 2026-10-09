@@ -45,14 +45,14 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 7 / 67 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 8 / 67 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
 | Phase | Name | Doc concept | Done | Status |
 |---|---|---|---|---|
 | 0 | [Design](#phase-0-design) | requirements, estimates (+ corrections), HLD | 1 / 2 | 🔄 |
-| 1 | [Local substrate](#phase-1-local-substrate) | — | 6 / 7 | 🔄 |
+| 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 0 / 4 | ⬜ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 0 / 6 | ⬜ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 0 / 7 | ⬜ |
@@ -81,7 +81,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 1.4 | Kafka (KRaft) + Kafka UI; topics, keys, partitions, offsets from the CLI | log vs queue, per-key ordering |
 | ✅ | 1.5 | ServiceDefaults: health checks + config wiring | liveness vs readiness |
 | ✅ | 1.6 | Gateway with YARP routing | single entry point |
-| ⬜ | 1.7 | `Money` value type + tests | integer minor units |
+| ✅ | 1.7 | `Money` value type + tests | integer minor units |
 
 ### Phase 2: Identity
 
@@ -200,7 +200,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 (the schema/detailed-design figures are blank in the PDF export, so the
 storage schema in `DESIGN.md` is inferred from the APIs and text). Stack,
 service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
-**Phase 1 — Modules 1.1–1.6 done, verified.**
+**Phase 1 — complete: all seven modules built, verified and committed.** Wrap-up (README + DESIGN §5) still to do.
 - 1.1 solution skeleton: `dotnet build PayX.slnx` green; `GET :7082/api/ping`
   → 200; unknown route → 404 `application/problem+json`. Committed.
 - 1.2 Postgres (`payx-postgres`, host port 5434): six databases, each owned by
@@ -244,6 +244,17 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   unhealthy) `HealthyAndUnknown` → Gateway 503 every time, `HealthyOrPanic`
   → routes anyway (200 from the live instance, 502 from the dead one).
   Committed, together with the AWS production topology and decision 19 in DESIGN.md.
+- 1.7 `Money` (Contracts): a `sealed record class` with `long AmountMinor` +
+  ISO-4217 `Currency`, per-currency exponent (USD 2, JPY 0, KWD 3; unknown
+  currencies rejected), capped at ±(2^53 − 1) so JavaScript clients read
+  every amount exactly, `FromMajor` refuses sub-minor amounts instead of
+  rounding, checked same-currency arithmetic, signed amounts, `Allocate` that
+  never loses a minor unit. Test project `tests/PayX.Contracts.Tests`
+  (xUnit): 15 tests green. **Found:** as a record struct, System.Text.Json
+  built it through the hidden parameterless constructor (null currency,
+  validation skipped); after owner review it became a class, which closes
+  that and the `default(Money)` hole. Known limits recorded under DESIGN
+  decision 17. Committed.
 
 ## Environment notes
 
@@ -253,6 +264,8 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 1, Module 1.7 — `Money` value type + tests (integer minor units + currency).**
+**Phase 1 wrap-up** (standing convention 1–2): README.md teaching section
+for Phase 1, DESIGN.md doc-to-code map (§5). Then **Phase 2, Module 2.1 —
+Identity: users table + EF Core migration.**
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.
