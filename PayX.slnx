@@ -2,6 +2,7 @@
   <Folder Name="/src/" />
   <Folder Name="/src/services/">
     <Project Path="src/services/PayX.Gateway/PayX.Gateway.csproj" />
+    <Project Path="src/services/PayX.Identity/PayX.Identity.csproj" />
     <Project Path="src/services/PayX.Payment/PayX.Payment.csproj" />
   </Folder>
   <Folder Name="/src/shared/">

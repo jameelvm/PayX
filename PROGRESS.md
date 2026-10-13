@@ -45,7 +45,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 8 / 67 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 9 / 67 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -53,7 +53,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 |---|---|---|---|---|
 | 0 | [Design](#phase-0-design) | requirements, estimates (+ corrections), HLD | 1 / 2 | 🔄 |
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
-| 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 0 / 4 | ⬜ |
+| 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 1 / 4 | 🔄 |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 0 / 6 | ⬜ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 0 / 7 | ⬜ |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
@@ -87,7 +87,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 
 | | Module | What it builds | Concept |
 |---|---|---|---|
-| ⬜ | 2.1 | Users table + EF Core migration | schema ownership |
+| ✅ | 2.1 | Users table + EF Core migration | schema ownership |
 | ⬜ | 2.2 | `registerUser` with password hashing | never store passwords |
 | ⬜ | 2.3 | `authenticateUser` → JWT | stateless auth |
 | ⬜ | 2.4 | Gateway validates JWT; customer / merchant / ops roles | auth at the edge |
@@ -256,6 +256,18 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   that and the `default(Money)` hole. Known limits recorded under DESIGN
   decision 17. Committed.
 
+**Phase 2 — Identity. In progress.**
+- 2.1 `PayX.Identity` (port 7081): `User` entity (UUID v7 id, lower-case
+  username/email, password-hash column, role as text), `IdentityDbContext`
+  with check constraints (lower-case username/email, role in the three
+  values) and unique indexes, snake_case naming, migration
+  `InitialUsers` applied at startup as role `payx_identity`. Verified:
+  migration applied on first start, "No migrations were applied" on the
+  second; `users` and `__EFMigrationsHistory` owned by `payx_identity`;
+  mixed-case email, duplicate username and role `Admin` all refused by
+  Postgres; `payx_payments` still can't connect to `payx_identity`.
+  Readiness checks `postgres:Identity`. Committed.
+
 ## Environment notes
 
 - **Git Bash rewrites container paths.** `docker exec payx-kafka /opt/kafka/bin/…`
@@ -264,8 +276,7 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 1 wrap-up** (standing convention 1–2): README.md teaching section
-for Phase 1, DESIGN.md doc-to-code map (§5). Then **Phase 2, Module 2.1 —
-Identity: users table + EF Core migration.**
+**Phase 2, Module 2.2 — `registerUser` with password hashing** (never store
+passwords; normalise input before the database's check constraints see it).
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.
