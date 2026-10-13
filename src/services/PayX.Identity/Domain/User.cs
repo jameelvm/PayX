@@ -15,8 +15,9 @@ public sealed class User
     public string Email { get; private set; } = null!;
 
     /// <summary>
-    /// A one-way hash, never the password itself. The hashing algorithm
-    /// arrives in Module 2.2; this module only reserves the column.
+    /// A slow, salted, one-way hash, never the password itself. Set through
+    /// <see cref="SetPasswordHash"/>; the column is NOT NULL, so a user saved
+    /// without one is refused by the database.
     /// </summary>
     public string PasswordHash { get; private set; } = null!;
 
@@ -24,7 +25,7 @@ public sealed class User
 
     public DateTimeOffset CreatedAt { get; private set; }
 
-    public User(string username, string email, string passwordHash, UserRole role)
+    public User(string username, string email, UserRole role)
     {
         // UUID v7: the first 48 bits are a timestamp, so new ids sort after
         // old ones. Inserts land at the end of the primary-key index instead
@@ -33,10 +34,13 @@ public sealed class User
         Id = Guid.CreateVersion7();
         Username = username;
         Email = email;
-        PasswordHash = passwordHash;
         Role = role;
         CreatedAt = DateTimeOffset.UtcNow;
     }
+
+    // Separate from the constructor because the hasher takes the user as an
+    // argument, and because changing a password later is the same operation.
+    public void SetPasswordHash(string passwordHash) => PasswordHash = passwordHash;
 
     // For EF Core when it materialises a row; not for application code.
     private User() { }

@@ -1,5 +1,8 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using PayX.Identity.Domain;
 using PayX.Identity.Repositories;
+using PayX.Identity.Services;
 using PayX.ServiceDefaults;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -13,6 +16,9 @@ builder.Services.AddDbContext<IdentityDbContext>(options => options
     // names to lower case, so snake_case is the only style you can type in
     // psql without quoting every identifier.
     .UseSnakeCaseNamingConvention());
+
+builder.Services.AddSingleton<IPasswordHasher<User>, PasswordHasher<User>>();
+builder.Services.AddScoped<UserRegistration>();
 
 var app = builder.Build();
 

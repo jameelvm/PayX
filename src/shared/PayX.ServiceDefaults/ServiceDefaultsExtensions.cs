@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,7 +19,10 @@ public static class ServiceDefaultsExtensions
     {
         // Controllers, not minimal APIs — same choice as JameX/SuggestX, for
         // consistent model-state validation.
-        builder.Services.AddControllers();
+        builder.Services.AddControllers()
+            // Enums travel as text ("Merchant"), not numbers ("1"): readable,
+            // and reordering an enum can't change what an old client meant.
+            .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
         // Every error leaves a service as an RFC 7807 ProblemDetails body, so
         // callers (and later the Gateway) see one error shape everywhere.
