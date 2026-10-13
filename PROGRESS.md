@@ -45,7 +45,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 10 / 67 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 11 / 67 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -53,7 +53,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 |---|---|---|---|---|
 | 0 | [Design](#phase-0-design) | requirements, estimates (+ corrections), HLD | 1 / 2 | 🔄 |
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
-| 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 2 / 4 | 🔄 |
+| 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 3 / 4 | 🔄 |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 0 / 6 | ⬜ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 0 / 7 | ⬜ |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
@@ -89,7 +89,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 |---|---|---|---|
 | ✅ | 2.1 | Users table + EF Core migration | schema ownership |
 | ✅ | 2.2 | `registerUser` with password hashing | never store passwords |
-| ⬜ | 2.3 | `authenticateUser` → JWT | stateless auth |
+| ✅ | 2.3 | `authenticateUser` → JWT | stateless auth |
 | ⬜ | 2.4 | Gateway validates JWT; customer / merchant / ops roles | auth at the edge |
 
 ### Phase 3: PSP Simulator + Vault
@@ -278,6 +278,17 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   email differing only in case; 400 for `Ops` and for validation; same
   password → different hashes; two racing sign-ups → one 201, one 409.
   Committed.
+- 2.3 `POST /api/users/login` → `{accessToken, tokenType: Bearer,
+  expiresIn: 900}`. `UserAuthentication` verifies the hash, runs a dummy
+  verification for unknown users (equal timing), and re-hashes on
+  `SuccessRehashNeeded`. `TokenIssuer` signs ES256 JWTs (iss
+  `payx-identity`, aud `payx-api`, sub, unique_name, role, jti, 15 min) with
+  a P-256 key in gitignored `App/.keys/identity-signing-key.pem` (created on
+  first login, path resolved from the content root); `kid` = RFC 7638
+  thumbprint. Decision 20 recorded. Verified: 200 + decoded token
+  (alg ES256, kid, claims, 64-byte signature); wrong password and unknown
+  user both 401 with the same body in ~40 ms; a 10,000-iteration hash was
+  upgraded to 100,000 on login. Committed.
 
 ## Environment notes
 
@@ -287,7 +298,7 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 2, Module 2.3 — `authenticateUser` → JWT** (verify the hash, issue a
-signed token; stateless auth).
+**Phase 2, Module 2.4 — Gateway validates JWTs; customer / merchant / ops
+roles** (public key via JWKS, a tampered token refused at the edge).
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.

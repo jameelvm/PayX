@@ -19,6 +19,9 @@ builder.Services.AddDbContext<IdentityDbContext>(options => options
 
 builder.Services.AddSingleton<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<UserRegistration>();
+builder.Services.AddScoped<UserAuthentication>();
+// Singleton: loads the signing key once, not on every login.
+builder.Services.AddSingleton<TokenIssuer>();
 
 var app = builder.Build();
 

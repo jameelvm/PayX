@@ -18,10 +18,28 @@ public sealed record RegisterUserRequest(
 // What a client gets back. Never the password hash, not even hashed.
 public sealed record UserResponse(Guid Id, string Username, string Email, UserRole Role, DateTimeOffset CreatedAt);
 
+// No format rules here, unlike registration: a login must not reveal which
+// usernames or passwords *could* exist, only "right" or "wrong".
+public sealed record LoginRequest([Required, MaxLength(32)] string Username, [Required, MaxLength(128)] string Password);
+
+public sealed record TokenResponse(string AccessToken, string TokenType, int ExpiresIn);
+
 [ApiController]
 [Route("api/users")]
-public sealed class UsersController(UserRegistration registration) : ControllerBase
+public sealed class UsersController(UserRegistration registration, UserAuthentication authentication) : ControllerBase
 {
+    [HttpPost("login")]
+    public async Task<IActionResult> Login(LoginRequest request, CancellationToken ct)
+    {
+        var token = await authentication.AuthenticateAsync(request.Username, request.Password, ct);
+
+        // One answer for "no such user" and "wrong password", so a login
+        // attempt can't be used to discover which usernames exist.
+        return token is null
+            ? Problem(statusCode: 401, title: "Invalid username or password")
+            : Ok(new TokenResponse(token.AccessToken, "Bearer", token.ExpiresInSeconds));
+    }
+
     // [ApiController] has already turned any failed validation attribute
     // above into a 400 ProblemDetails before this method runs.
     [HttpPost]

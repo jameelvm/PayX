@@ -184,6 +184,7 @@ NAT Gateway dominate); for learning, deploy, run the drills and tear it down.
 | 17 | Money as a `sealed record class`: `long` minor units + ISO-4217 currency, capped at ±(2^53 − 1) | Accepted (Module 1.7) | No float rounding; currency explicit everywhere; per-currency decimals (JPY 0, KWD 3). A class, not a struct, so `default(Money)` and deserializers can't create one with a null currency. The cap keeps every amount exact in a JavaScript `Number` (JSON is parsed as doubles) | `decimal` (no currency, parsed as a double by JS); `record struct` (the `default` / hidden-constructor hole, hit in 1.7); amounts as JSON strings (avoids the cap, but every client must parse them) |
 | 18 | Gateway **fails open** when every instance of a service is unhealthy (YARP `HealthyOrPanic`) | Accepted (verified in Module 1.6) | Matches AWS ALB, the production target. If every instance looks unhealthy, a broken health check is a likelier cause than every instance failing at once; failing closed would turn that into a full outage. Instances whose database really is down still fail fast with their own 503 before any money moves | Fail closed (`HealthyAndUnknown`): Gateway returns 503 itself. Cleaner when the outage is real, but a bad probe path or a probe timeout set too tight takes the whole service offline |
 | 19 | Self-hosted **YARP Gateway behind an ALB**, not Amazon API Gateway | Accepted | Learning value (routing, balancing, health and fail-open are visible and testable, as decision 18 showed); identical behaviour locally and on AWS; custom C# edge logic (e.g. require `Idempotency-Key` on POST, scrub card data from logs); at the doc's ~1.5B requests/month, per-request pricing (~$1/M HTTP API, ~$3.50/M REST) costs far more than an ALB plus a few containers | Amazon API Gateway (HTTP API + VPC Link + Cloud Map): fully managed, built-in JWT authorizers, throttling, usage plans and API keys, WAF. The better choice for low or spiky volume, serverless/Lambda backends, or a public merchant API with per-client keys |
+| 20 | Access tokens are **JWTs signed with ES256** (asymmetric), 15-minute lifetime, no refresh tokens yet | Accepted (Module 2.3) | Stateless: the Gateway verifies a token without calling Identity or a database. Asymmetric so only Identity can *issue* tokens; every verifier holds just the public key, so a leak from a verifier can't mint a Merchant or Ops token. Short lifetime because a stateless token can't be revoked before it expires. Locally the private key is a gitignored PEM; on AWS it would be an asymmetric KMS key used via `kms:Sign`, so the private key never leaves KMS | HS256 shared secret (every verifier could forge tokens); opaque session ids looked up on each request (a database or cache hit per call, but instant revocation); long-lived tokens (stolen token stays useful for hours). Refresh tokens deferred to §4 |
 
 **Decision 17 notes: known limits of `Money`, deliberately left for later**
 
@@ -331,6 +332,9 @@ also a one-module experiment if we ever want to compare the two.)
 - 3-D Secure challenge flow — modelled as a `CHALLENGED` state; full flow deferred.
 - Multi-PSP routing / failover — mention only, unless time allows.
 - Payouts from merchant available balance to bank — deferred.
+- Refresh tokens and token revocation (Module 2.3 issues 15-minute access
+  tokens only; the user logs in again after expiry). Also login rate
+  limiting / lockout against password guessing — belongs at the Gateway.
 
 ## §5 Doc-to-code map
 
