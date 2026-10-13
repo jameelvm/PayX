@@ -200,7 +200,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 (the schema/detailed-design figures are blank in the PDF export, so the
 storage schema in `DESIGN.md` is inferred from the APIs and text). Stack,
 service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
-**Phase 1 — complete: all seven modules built, verified and committed.** Wrap-up (README + DESIGN §5) still to do.
+**Phase 1 — complete: all seven modules built, verified and committed.** Wrap-up done: README Phase 1 teaching section, RUNNING.md, DESIGN §5 doc-to-code map.
 - 1.1 solution skeleton: `dotnet build PayX.slnx` green; `GET :7082/api/ping`
   → 200; unknown route → 404 `application/problem+json`. Committed.
 - 1.2 Postgres (`payx-postgres`, host port 5434): six databases, each owned by

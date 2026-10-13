@@ -16,8 +16,9 @@ every component in the design doc has a real, runnable counterpart here.
   table, Q&A bank and a doc-to-code coverage map. **Extend it at the end of
   every phase.** README explains *how* it was built; DESIGN explains *why it is
   shaped this way*.
-- `RUNNING.md` and `DEBUGGING.md` arrive with Phase 1, same role as in the
-  sibling projects.
+- **`RUNNING.md`** — how to run the stack locally (containers, services,
+  tests). `DEBUGGING.md` arrives once services run in containers, same role
+  as in the sibling projects.
 
 ## Owner context
 

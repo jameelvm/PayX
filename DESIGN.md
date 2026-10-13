@@ -334,4 +334,19 @@ also a one-module experiment if we ever want to compare the two.)
 
 ## §5 Doc-to-code map
 
-Filled in as phases land.
+Each design-doc concept → where it is implemented. Extended at the end of
+every phase; rows for later phases are added when they land.
+
+| Doc concept (chapter) | Module | Where |
+|---|---|---|
+| "Associated database" per service (ch.2 detailed design) | 1.2 | [`infra/postgres/init/01-databases-and-roles.sql`](infra/postgres/init/01-databases-and-roles.sql) |
+| Data integrity & security NFR: least privilege between services (ch.1) | 1.2 | same file: one role per database, `REVOKE CONNECT … FROM PUBLIC` |
+| Card-data encryption: "where are payment details encrypted?" (ch.2) | 1.3 (key only; Vault in 3.5) | [`infra/localstack/init/01-bootstrap.sh`](infra/localstack/init/01-bootstrap.sh): `alias/payx-card-vault` |
+| PSP end-of-day settlement file (ch.2 reconciliation) | 1.3 (bucket only; Phase 8) | same file: `payx-settlement-files` |
+| Risk check system's real-time signals (ch.2) | 1.3 (store only; Phase 5) | `redis` in [`docker-compose.yml`](docker-compose.yml) (`noeviction`) |
+| Kafka for transaction completion (ch.2 "Transaction completion") | 1.4 | [`infra/kafka/create-topics.sh`](infra/kafka/create-topics.sh), `kafka` in `docker-compose.yml` |
+| Availability & reliability NFRs: failover (ch.1) | 1.5 | [`ServiceDefaults/Health/HealthEndpoints.cs`](src/shared/PayX.ServiceDefaults/Health/HealthEndpoints.cs), [`PostgresHealthCheck.cs`](src/shared/PayX.ServiceDefaults/Health/PostgresHealthCheck.cs) |
+| Load balancer in front of the payment service (ch.2 HLD) | 1.6 | [`PayX.Gateway/appsettings.json`](src/services/PayX.Gateway/appsettings.json) |
+| Payment service (ch.2), host only so far | 1.1 | [`PayX.Payment/Program.cs`](src/services/PayX.Payment/Program.cs) |
+| Amounts in APIs and records (ch.2 `authorizePayment(amount, …)`, ledger amounts) | 1.7 | [`PayX.Contracts/Money.cs`](src/shared/PayX.Contracts/Money.cs) |
+| Multiple sellers per purchase: each seller's wallet updated separately (ch.2 Wallet) | 1.7 (split only; wallets in 7.5) | `Money.Allocate` |
