@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
-using System.Security.Cryptography;
 using Microsoft.AspNetCore.Mvc;
 using PayX.PspSimulator.Domain;
+using PayX.PspSimulator.Services;
 
 namespace PayX.PspSimulator.Api;
 
@@ -28,10 +28,10 @@ public sealed record AuthorizeResponse(
 
 [ApiController]
 [Route("api/psp/authorizations")]
-public sealed class AuthorizationsController : ControllerBase
+public sealed class AuthorizationsController(Authorizer authorizer) : ControllerBase
 {
     [HttpPost]
-    public IActionResult Authorize(AuthorizeRequest request)
+    public async Task<IActionResult> Authorize(AuthorizeRequest request, CancellationToken ct)
     {
         var number = request.Card.Number.Replace(" ", "");
 
@@ -42,23 +42,17 @@ public sealed class AuthorizationsController : ControllerBase
             return Problem(statusCode: 400, title: "card_not_supported");
 
         // 2. Issuer bank: does this cardholder's account allow the hold?
-        var declineCode = IssuerBank.Decide(number, request.Card.ExpMonth, request.Card.ExpYear,
-            request.Amount, DateOnly.FromDateTime(DateTime.UtcNow));
+        //    (Approved → a hold is recorded against the card's credit.)
+        var auth = await authorizer.AuthorizeAsync(number, brand.ToString(), request.Card.ExpMonth,
+            request.Card.ExpYear, request.Amount, request.Currency, request.MerchantId, ct);
 
         // A decline is a 200, not an error: the request was understood and
         // processed, and the answer was "no". The difference matters to the
         // caller in Phase 6: an error (5xx, timeout) may be worth retrying; a
         // decline never is, because the same card will be declined again.
-        return Ok(new AuthorizeResponse(
-            AuthorizationId: $"auth_{Guid.CreateVersion7():N}",
-            Status: declineCode is null ? "authorized" : "declined",
-            // The issuer's approval code: proof the bank said yes, quoted in
-            // capture and disputes. Real codes are 6 alphanumeric characters.
-            AuthorizationCode: declineCode is null ? RandomNumberGenerator.GetString("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6) : null,
-            DeclineCode: declineCode,
-            Brand: brand.ToString(),
-            Last4: number[^4..],
-            Amount: request.Amount,
-            Currency: request.Currency));
+        // The authorization code is the issuer's proof it said yes, quoted
+        // in capture and disputes.
+        return Ok(new AuthorizeResponse(auth.Id, auth.Status.ToString().ToLowerInvariant(),
+            auth.AuthorizationCode, auth.DeclineCode, auth.Brand, auth.Last4, auth.AmountMinor, auth.Currency));
     }
 }

@@ -18,7 +18,7 @@ public static class IssuerBank
     public const string ExpiredCard = "expired_card";
     public const string IncorrectCvc = "incorrect_cvc";
 
-    /// <summary>Credit limit for any card not on the list below.</summary>
+    /// <summary>Credit limit given to every card account when it is first seen.</summary>
     public const long DefaultLimitMinor = 500_000;   // 5,000.00 in a 2-decimal currency
 
     private static readonly Dictionary<string, string> TestCards = new()
@@ -29,8 +29,12 @@ public static class IssuerBank
         ["4000000000000127"] = IncorrectCvc,
     };
 
+    /// <param name="availableMinor">
+    /// Credit limit minus live holds, worked out by the caller (Module 3.2).
+    /// </param>
     /// <returns>null if approved, otherwise the decline reason.</returns>
-    public static string? Decide(string number, int expMonth, int expYear, long amountMinor, DateOnly today)
+    public static string? Decide(string number, int expMonth, int expYear, long amountMinor,
+        long availableMinor, DateOnly today)
     {
         if (TestCards.TryGetValue(number, out var scripted))
             return scripted;
@@ -40,7 +44,8 @@ public static class IssuerBank
         if (today > lastValidDay)
             return ExpiredCard;
 
-        // The real check: is there enough available credit for this hold?
-        return amountMinor > DefaultLimitMinor ? InsufficientFunds : null;
+        // The real check: is there enough *available* credit for this hold,
+        // after the holds already placed on the card?
+        return amountMinor > availableMinor ? InsufficientFunds : null;
     }
 }

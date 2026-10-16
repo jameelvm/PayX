@@ -51,7 +51,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 13 / 67 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 14 / 68 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -60,7 +60,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 0 | [Design](#phase-0-design) | requirements, estimates (+ corrections), HLD | 1 / 2 | 🔄 |
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
-| 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 1 / 6 | 🔄 |
+| 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 2 / 7 | 🔄 |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 0 / 7 | ⬜ |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
@@ -103,11 +103,12 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | | Module | What it builds | Concept |
 |---|---|---|---|
 | ✅ | 3.1 | PSP sim: `authorize` with test cards | the outside world |
-| ⬜ | 3.2 | `capture` + `void`, authorization holds | two-phase card payments |
-| ⬜ | 3.3 | `status` lookup + idempotency on the PSP side | provider-side dedupe |
-| ⬜ | 3.4 | Failure injection (latency, 5xx, timeout-after-success) | testing partial failure |
-| ⬜ | 3.5 | Vault: KMS envelope encryption of one card number | envelope encryption |
-| ⬜ | 3.6 | Vault: tokenize / detokenize API, CVV never stored | tokenization, PCI scope |
+| ✅ | 3.2 | PSP sim remembers authorizations as holds on available credit | an authorization is a reservation; races on balances |
+| ⬜ | 3.3 | `capture` + `void` | two-phase card payments |
+| ⬜ | 3.4 | `status` lookup + idempotency on the PSP side | provider-side dedupe |
+| ⬜ | 3.5 | Failure injection (latency, 5xx, timeout-after-success) | testing partial failure |
+| ⬜ | 3.6 | Vault: KMS envelope encryption of one card number | envelope encryption |
+| ⬜ | 3.7 | Vault: tokenize / detokenize API, CVV never stored | tokenization, PCI scope |
 
 ### Phase 4: Payment core
 
@@ -320,6 +321,18 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   worth retrying), malformed cards 400. Response has last 4 only. No
   storage yet (3.2). Verified: 13 scenarios, all as expected; no full card
   number in the service log. Committed.
+- 3.2 PSP simulator gets its own database (`payx_psp`, migration
+  `InitialAuthorizations`): `card_accounts` (HMAC fingerprint of the card
+  number → credit limit; no card numbers stored) and `authorizations`
+  (approved = a live hold, declined stored too). `Authorizer`: in one
+  transaction, open the account (`ON CONFLICT DO NOTHING`), lock it
+  (`SELECT … FOR UPDATE`), available = limit − live holds (derived, never
+  stored), decide, insert, commit. Decision 22 + failure-mode row.
+  Verified: $3,000 ✅ → $3,000 ❌ insufficient → $2,000 ✅ → $0.01 ❌.
+  25 truly simultaneous $1,000 requests (threads released by a barrier):
+  without the lock $6,001 and $10,001 held on a $5,000 card; with it,
+  $4,001 both times. (Parallel `curl` processes on Windows start too
+  slowly to race; they showed nothing either way.) Committed.
 
 ## Environment notes
 
@@ -329,7 +342,8 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 3, Module 3.2 — PSP simulator remembers authorizations: `capture` +
-`void`, holds on available credit** (two-phase card payments).
+**Phase 3, Module 3.3 — `capture` + `void`** (a hold becomes a charge or is
+released; illegal transitions refused). 3.2 was split on 2026-10-15: holds
+in 3.2, capture + void here; later Phase 3 modules shifted by one.
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.
