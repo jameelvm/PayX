@@ -38,13 +38,17 @@ public sealed class Authorizer(PspDbContext db, IConfiguration config)
             .FromSqlInterpolated($"SELECT * FROM card_accounts WHERE fingerprint = {fingerprint} FOR UPDATE")
             .ToListAsync(ct)).Single();
 
-        // Available = limit minus live holds. Derived, never stored: a stored
-        // "available" column is one more number that can disagree with the
-        // holds it is supposed to summarise.
-        var held = await db.Authorizations
-            .Where(a => a.CardFingerprint == fingerprint && a.Status == AuthorizationStatus.Authorized)
-            .SumAsync(a => a.AmountMinor, ct);
-        var available = account.LimitMinor - held;
+        // Available = limit minus live holds minus charges. Derived, never
+        // stored: a stored "available" column is one more number that can
+        // disagree with the holds and charges it is supposed to summarise.
+        // A capture swaps a hold for a charge of at most the same amount, so
+        // it never reduces available credit further; a void frees it.
+        var used = await db.Authorizations
+            .Where(a => a.CardFingerprint == fingerprint)
+            .SumAsync(a => a.Status == AuthorizationStatus.Authorized ? a.AmountMinor
+                         : a.Status == AuthorizationStatus.Captured ? a.CapturedAmountMinor!.Value
+                         : 0, ct);
+        var available = account.LimitMinor - used;
 
         var declineCode = IssuerBank.Decide(number, expMonth, expYear, amountMinor, available,
             DateOnly.FromDateTime(DateTime.UtcNow));

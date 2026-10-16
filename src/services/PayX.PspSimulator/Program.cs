@@ -17,6 +17,7 @@ builder.Services.AddDbContext<PspDbContext>(options => options
     .UseNpgsql(builder.Configuration.GetConnectionString("Psp"))
     .UseSnakeCaseNamingConvention());
 builder.Services.AddScoped<Authorizer>();
+builder.Services.AddScoped<AuthorizationActions>();
 
 var app = builder.Build();
 

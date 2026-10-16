@@ -24,7 +24,15 @@ public sealed class PspDbContext(DbContextOptions<PspDbContext> options) : DbCon
         modelBuilder.Entity<Authorization>(auth =>
         {
             auth.ToTable("authorizations", t =>
-                t.HasCheckConstraint("ck_authorizations_amount_positive", "amount_minor > 0"));
+            {
+                t.HasCheckConstraint("ck_authorizations_amount_positive", "amount_minor > 0");
+                // Never charge more than was authorized, even if code forgets to check.
+                t.HasCheckConstraint("ck_authorizations_captured_within_authorized",
+                    "captured_amount_minor IS NULL OR (captured_amount_minor > 0 AND captured_amount_minor <= amount_minor)");
+            });
+            // uint + IsRowVersion → Npgsql maps it to the system column xmin:
+            // no extra column, and Postgres updates it on every write.
+            auth.Property(a => a.Version).IsRowVersion();
             auth.HasKey(a => a.Id);
             auth.Property(a => a.Id).HasMaxLength(40);
             auth.Property(a => a.CardFingerprint).HasMaxLength(64);

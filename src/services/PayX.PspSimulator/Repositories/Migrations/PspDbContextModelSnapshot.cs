@@ -44,6 +44,14 @@ namespace PayX.PspSimulator.Repositories.Migrations
                         .HasColumnType("character varying(16)")
                         .HasColumnName("brand");
 
+                    b.Property<long?>("CapturedAmountMinor")
+                        .HasColumnType("bigint")
+                        .HasColumnName("captured_amount_minor");
+
+                    b.Property<DateTimeOffset?>("CapturedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("captured_at");
+
                     b.Property<string>("CardFingerprint")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -83,6 +91,12 @@ namespace PayX.PspSimulator.Repositories.Migrations
                         .HasColumnType("character varying(16)")
                         .HasColumnName("status");
 
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
                     b.HasKey("Id")
                         .HasName("pk_authorizations");
 
@@ -92,6 +106,8 @@ namespace PayX.PspSimulator.Repositories.Migrations
                     b.ToTable("authorizations", null, t =>
                         {
                             t.HasCheckConstraint("ck_authorizations_amount_positive", "amount_minor > 0");
+
+                            t.HasCheckConstraint("ck_authorizations_captured_within_authorized", "captured_amount_minor IS NULL OR (captured_amount_minor > 0 AND captured_amount_minor <= amount_minor)");
                         });
                 });
 

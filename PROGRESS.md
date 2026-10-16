@@ -51,7 +51,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 14 / 68 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 15 / 68 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -60,7 +60,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 0 | [Design](#phase-0-design) | requirements, estimates (+ corrections), HLD | 1 / 2 | 🔄 |
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
-| 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 2 / 7 | 🔄 |
+| 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 3 / 7 | 🔄 |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 0 / 7 | ⬜ |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
@@ -104,7 +104,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 |---|---|---|---|
 | ✅ | 3.1 | PSP sim: `authorize` with test cards | the outside world |
 | ✅ | 3.2 | PSP sim remembers authorizations as holds on available credit | an authorization is a reservation; races on balances |
-| ⬜ | 3.3 | `capture` + `void` | two-phase card payments |
+| ✅ | 3.3 | `capture` + `void` | two-phase card payments |
 | ⬜ | 3.4 | `status` lookup + idempotency on the PSP side | provider-side dedupe |
 | ⬜ | 3.5 | Failure injection (latency, 5xx, timeout-after-success) | testing partial failure |
 | ⬜ | 3.6 | Vault: KMS envelope encryption of one card number | envelope encryption |
@@ -333,6 +333,22 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   without the lock $6,001 and $10,001 held on a $5,000 card; with it,
   $4,001 both times. (Parallel `curl` processes on Windows start too
   slowly to race; they showed nothing either way.) Committed.
+- 3.3 `POST /api/psp/authorizations/{id}/capture {amount}` and
+  `/{id}/void`. State rules on `Authorization` (`Capture` / `Void` from
+  Authorized only; partial capture allowed, never above the authorized
+  amount, unused part released), new statuses Captured/Voided,
+  `captured_amount_minor` + `captured_at` (settlement will batch by it),
+  check constraint `captured ≤ authorized`, `xmin` as optimistic
+  concurrency token (Npgsql skips it in the migration SQL, verified).
+  Available credit now counts charges as well as holds. Refusals are 409
+  with a code, unknown id 404. Decision 23 + failure-mode row. Verified on
+  fresh cards: partial capture $2,500 of $3,000 → $2,500 available after;
+  capture twice / void after capture / capture after void / capture a
+  decline / over-capture all 409; void frees the full hold. 20 truly
+  simultaneous capture-vs-void rounds: exactly one winner each time,
+  final states 11 captured + 9 voided, never both. (First run reused cards
+  exhausted by 3.2's tests; their authorizations were declined, so that
+  run only proved declines can't be captured.) Committed.
 
 ## Environment notes
 
@@ -342,8 +358,8 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 3, Module 3.3 — `capture` + `void`** (a hold becomes a charge or is
-released; illegal transitions refused). 3.2 was split on 2026-10-15: holds
-in 3.2, capture + void here; later Phase 3 modules shifted by one.
+**Phase 3, Module 3.4 — `status` lookup + idempotency on the PSP side** (a
+retried capture after a timeout must not 409 or charge twice; the caller
+can always ask "what happened?").
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.
