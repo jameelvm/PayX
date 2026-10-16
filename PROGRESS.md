@@ -26,6 +26,12 @@ tracker*, *Current state* and
 4. Build in short modules, one concept each, pausing after every module.
 5. Tick the module in the *Progress tracker* below: 🔍 when built, ✅ when
    the owner approves and it is committed.
+6. **Immediately before every commit:** `dotnet build PayX.slnx
+   --no-incremental` (0 warnings, 0 errors) and `dotnet test PayX.slnx`,
+   then `git diff --cached --stat` to check that only expected files are
+   staged. Added after commit `bd1a26f` shipped a broken build: an editor
+   save removed Identity's JWT package reference 26 s before the commit, and
+   `git add -A` picked it up without a rebuild.
 
 **Module size rule (owner's requirement — the point is mastery, not speed)**
 
