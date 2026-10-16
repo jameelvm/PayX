@@ -369,3 +369,8 @@ every phase; rows for later phases are added when they land.
 | Payment service (ch.2), host only so far | 1.1 | [`PayX.Payment/Program.cs`](src/services/PayX.Payment/Program.cs) |
 | Amounts in APIs and records (ch.2 `authorizePayment(amount, …)`, ledger amounts) | 1.7 | [`PayX.Contracts/Money.cs`](src/shared/PayX.Contracts/Money.cs) |
 | Multiple sellers per purchase: each seller's wallet updated separately (ch.2 Wallet) | 1.7 (split only; wallets in 7.5) | `Money.Allocate` |
+| User storage behind `registerUser` (ch.2 API design) | 2.1 | [`Identity/Domain/User.cs`](src/services/PayX.Identity/Domain/User.cs), [`IdentityDbContext.cs`](src/services/PayX.Identity/Repositories/IdentityDbContext.cs), `Repositories/Migrations/` |
+| `registerUser(username, email, password)`: "hashes the user's password before saving it" (ch.2) | 2.2 | [`Identity/Services/UserRegistration.cs`](src/services/PayX.Identity/Services/UserRegistration.cs), [`Api/UsersController.cs`](src/services/PayX.Identity/Api/UsersController.cs) |
+| `authenticateUser(username, password)` (ch.2) | 2.3 | [`Identity/Services/UserAuthentication.cs`](src/services/PayX.Identity/Services/UserAuthentication.cs), [`TokenIssuer.cs`](src/services/PayX.Identity/Services/TokenIssuer.cs) |
+| "The user authentication service verifies the customer's identity" before payment (ch.2 detailed design) | 2.4 | [`Gateway/Program.cs`](src/services/PayX.Gateway/Program.cs) (JwtBearer, policies), [`Identity/Api/WellKnownController.cs`](src/services/PayX.Identity/Api/WellKnownController.cs) (JWKS) |
+| Security NFR: secure storage, encryption, least privilege (ch.1) | 2.2–2.4 | salted PBKDF2 hashes; asymmetric token signing; deny-by-default authorization |

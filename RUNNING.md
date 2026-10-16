@@ -45,16 +45,33 @@ dotnet build PayX.slnx
 dotnet run --project src/services/PayX.Payment --launch-profile "Payment (local)"
 dotnet run --project src/services/PayX.Payment --no-launch-profile --urls http://localhost:7092 --environment Development
 
-# terminal 3: Gateway
+# terminal 3: Identity (applies its migrations on start)
+dotnet run --project src/services/PayX.Identity --launch-profile "Identity (local)"
+
+# terminal 4: Gateway (fetches Identity's public key, so start Identity first)
 dotnet run --project src/services/PayX.Gateway --launch-profile "Gateway (local)"
 ```
+
+Identity creates its signing key on first login at `.keys/identity-signing-key.pem`
+(gitignored). Delete it to rotate; existing tokens then stop verifying.
 
 Check:
 
 ```bash
-curl localhost:7080/api/payments/ping     # alternates "instance":"7082" / "7092"
-curl localhost:7082/health/ready          # postgres:Payments Healthy
+# register, log in, call a protected route
+curl -X POST localhost:7080/api/users -H "Content-Type: application/json" \
+  -d '{"username":"priya_s","email":"priya@example.com","password":"correct horse battery","role":"Customer"}'
+
+TOKEN=$(curl -s -X POST localhost:7080/api/users/login -H "Content-Type: application/json" \
+  -d '{"username":"priya_s","password":"correct horse battery"}' | python -c "import sys,json;print(json.load(sys.stdin)['accessToken'])")
+
+curl localhost:7080/api/payments/ping -H "Authorization: Bearer $TOKEN"   # 200, alternates 7082 / 7092
+curl localhost:7080/api/payments/ping                                     # 401
+curl localhost:7082/health/ready                                          # postgres:Payments Healthy
 ```
+
+Ops accounts can't self-register; create one in psql as an admin would
+(see PROGRESS.md, Module 2.4).
 
 ## 4. Tests
 

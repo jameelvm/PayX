@@ -198,3 +198,111 @@ log. Every service reports liveness and readiness, and the Gateway routes
 around unready instances, failing open like an ALB when all of them fail.
 Every amount is an exact integer with its currency. Nothing yet moves
 money; Phase 2 adds who the users are.
+
+---
+
+## Phase 2 — Identity
+
+**What the phase delivers:** the doc's `registerUser` and `authenticateUser`
+APIs, and authentication enforced at the edge: every request after login
+carries a signed token that the Gateway checks without calling Identity or
+any database.
+
+```
+ register ─► Gateway ─(anonymous)─► Identity ─► payx_identity.users  (PBKDF2 hash, never the password)
+ login    ─► Gateway ─(anonymous)─► Identity ─► 15-min ES256 JWT  (signed with Identity's private key)
+ pay      ─► Gateway: verify signature with Identity's PUBLIC key (JWKS), iss, aud, exp, role
+                 ├─ bad / missing token → 401        ├─ wrong role → 403
+                 └─ ok → forwarded to Payment
+```
+
+### 2.1 Users table and the first migration
+
+**Built:** the Identity service (:7081), a `User` entity, `IdentityDbContext`,
+and the `InitialUsers` migration applied at startup as role `payx_identity`.
+
+**Why:** the service owns its schema as versioned migrations in source
+control; `__EFMigrationsHistory` makes each run exactly once. The database is
+the last line of defence: check constraints refuse a mixed-case username or
+email (so uniqueness is case-insensitive) and any role outside Customer,
+Merchant, Ops. Roles are stored as text, ids are UUID v7 (time-ordered, so
+inserts append to the index instead of scattering).
+
+**Verify:** a mixed-case email, a duplicate username and role `Admin` are all
+refused by Postgres; the second start logs "No migrations were applied".
+
+**Talking point:** migrating at startup is a local convenience; in production
+migrations run once as a separate deploy step, or every instance races to
+migrate and a failed migration crash-loops all of them.
+
+### 2.2 registerUser: password hashing
+
+**Built:** `POST /api/users`: validate, normalise (trim, lower-case), refuse
+`Ops` self-registration, hash, insert.
+
+**Why:** the stored value is a PBKDF2-HMAC-SHA512 hash with a random 128-bit
+salt and 100,000 iterations. Slow on purpose: each guess against a leaked
+table costs 100,000 hash computations, where SHA-256 allows billions per
+second on a GPU. The salt makes identical passwords hash differently. There
+is no "does it exist?" query before inserting: two racing sign-ups would
+both see "no". The unique index decides, and its violation becomes a 409.
+
+**Verify:** same password for two users gives two different hashes; two
+simultaneous sign-ups for one username give one 201 and one 409.
+
+**Talking point:** check-then-insert is a race; let the constraint decide.
+
+### 2.3 authenticateUser: signed tokens
+
+**Built:** `POST /api/users/login` returns a 15-minute JWT signed with ES256.
+
+**Why:** the token is the session (stateless authentication). Asymmetric
+signing means only Identity can issue tokens; verifiers hold just the public
+key, so a leaking verifier can't mint an Ops token (decision 20). Unknown
+users get the same 401 body and, through a dummy hash check, the same
+response time as a wrong password, so neither the message nor a stopwatch
+reveals which usernames exist. Weaker stored hashes are upgraded on login,
+the only moment the plain password is available.
+
+**Verify:** wrong password and unknown user both 401 in ~40 ms; a
+10,000-iteration hash becomes 100,000 after one login.
+
+**Talking points:** a JWT is signed, not encrypted (never put secrets in it).
+Each claim blocks something: `iss` other issuers, `aud` tokens meant for
+other apps, `exp` stolen tokens living forever, the signature tampering,
+`sub` acting as someone else. Short lifetime because a stateless token
+can't be revoked early.
+
+### 2.4 The Gateway validates tokens
+
+**Built:** Identity publishes OIDC discovery and JWKS (public key only); the
+Gateway validates signature, `iss`, `aud`, `exp` and ES256-only, denies by
+default, opens `/api/users/**` explicitly, and limits `/api/payments/**` to
+Customer or Merchant.
+
+**Why:** bad tokens are rejected at the edge. Keys are discovered, not
+copied: an unknown `kid` triggers a refetch, so key rotation needs no
+redeploy. Accepting only ES256 blocks `alg: none` and algorithm-switching
+forgeries. Deny-by-default means a route someone forgets to protect is
+locked, not open. Fine-grained rules stay in the owning service
+(decision 21).
+
+**Verify:** no token 401; Customer and Merchant 200; a valid Ops token 403;
+a tampered payload, `alg: none` and garbage all 401 ("The signature is
+invalid").
+
+**Talking points:** 401 means "who are you?", 403 means "I know who you
+are, and no". Middleware order is part of the contract: the error formatter
+must run before authentication, or 401/403 leave with empty bodies (found
+and fixed in this module).
+
+### Phase 2 in one paragraph
+
+Passwords are never stored, only slow salted hashes, and uniqueness is
+decided by the database, not by a racy check. A login yields a short-lived
+token that only Identity can sign and anyone can verify. The Gateway checks
+every token at the edge, refuses anything it can't verify, locks every
+route by default, and separates "who are you?" (401) from "you may not"
+(403). Phase 3 builds the outside world: the payment provider, card
+network and bank, and the vault that keeps card numbers out of everything
+else.

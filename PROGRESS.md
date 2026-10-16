@@ -256,7 +256,7 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   that and the `default(Money)` hole. Known limits recorded under DESIGN
   decision 17. Committed.
 
-**Phase 2 — Identity. Complete: all four modules built, verified and committed.**
+**Phase 2 — Identity. Complete: all four modules built, verified and committed.** Wrap-up done: README Phase 2 section, RUNNING.md (Identity + token flow), DESIGN §5 rows.
 - 2.1 `PayX.Identity` (port 7081): `User` entity (UUID v7 id, lower-case
   username/email, password-hash column, role as text), `IdentityDbContext`
   with check constraints (lower-case username/email, role in the three
@@ -310,8 +310,7 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 2 wrap-up** (README Phase 2 section, DESIGN §5 rows, RUNNING.md
-update for Identity), then **Phase 3, Module 3.1 — PSP simulator:
-`authorize` with test cards.**
+**Phase 3, Module 3.1 — PSP simulator: `authorize` with test cards** (the
+outside world: payment provider + card network + issuer bank).
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.
