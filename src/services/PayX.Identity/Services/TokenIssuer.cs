@@ -42,7 +42,23 @@ public sealed class TokenIssuer
         // keys can be rotated without breaking tokens signed by the old one.
         key.KeyId = Base64UrlEncoder.Encode(JsonWebKeyConverter.ConvertFromECDsaSecurityKey(key).ComputeJwkThumbprint());
         _credentials = new SigningCredentials(key, SecurityAlgorithms.EcdsaSha256);
+
+        // The public half only (x, y): enough to verify a signature, useless
+        // for creating one. Built field by field so the private part (d) can't
+        // slip into the published document by accident.
+        var publicPoint = key.ECDsa.ExportParameters(includePrivateParameters: false).Q;
+        PublicJwk = new
+        {
+            kty = "EC", crv = "P-256", use = "sig", alg = "ES256", kid = key.KeyId,
+            x = Base64UrlEncoder.Encode(publicPoint.X),
+            y = Base64UrlEncoder.Encode(publicPoint.Y),
+        };
     }
+
+    public string Issuer => _issuer;
+
+    /// <summary>The verification key as a JSON Web Key (RFC 7517).</summary>
+    public object PublicJwk { get; }
 
     public IssuedToken Issue(User user)
     {

@@ -28,17 +28,20 @@ public static class HealthEndpoints
     {
         // Predicate = _ => false: run no checks at all. If the process can
         // answer this HTTP request, it is alive.
+        // AllowAnonymous: probes come from the load balancer and orchestrator,
+        // which have no user token. Matters wherever a service makes "logged
+        // in" the default for every endpoint (the Gateway, from Module 2.4).
         app.MapHealthChecks("/health/live", new HealthCheckOptions
         {
             Predicate = _ => false,
             ResponseWriter = WriteJson,
-        });
+        }).AllowAnonymous();
 
         app.MapHealthChecks("/health/ready", new HealthCheckOptions
         {
             Predicate = check => check.Tags.Contains(ReadyTag),
             ResponseWriter = WriteJson,
-        });
+        }).AllowAnonymous();
 
         return app;
     }

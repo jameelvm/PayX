@@ -45,7 +45,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 11 / 67 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 12 / 67 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -53,7 +53,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 |---|---|---|---|---|
 | 0 | [Design](#phase-0-design) | requirements, estimates (+ corrections), HLD | 1 / 2 | 🔄 |
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
-| 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 3 / 4 | 🔄 |
+| 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 0 / 6 | ⬜ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 0 / 7 | ⬜ |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
@@ -90,7 +90,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 2.1 | Users table + EF Core migration | schema ownership |
 | ✅ | 2.2 | `registerUser` with password hashing | never store passwords |
 | ✅ | 2.3 | `authenticateUser` → JWT | stateless auth |
-| ⬜ | 2.4 | Gateway validates JWT; customer / merchant / ops roles | auth at the edge |
+| ✅ | 2.4 | Gateway validates JWT; customer / merchant / ops roles | auth at the edge |
 
 ### Phase 3: PSP Simulator + Vault
 
@@ -256,7 +256,7 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   that and the `default(Money)` hole. Known limits recorded under DESIGN
   decision 17. Committed.
 
-**Phase 2 — Identity. In progress.**
+**Phase 2 — Identity. Complete: all four modules built, verified and committed.**
 - 2.1 `PayX.Identity` (port 7081): `User` entity (UUID v7 id, lower-case
   username/email, password-hash column, role as text), `IdentityDbContext`
   with check constraints (lower-case username/email, role in the three
@@ -289,6 +289,18 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   (alg ES256, kid, claims, 64-byte signature); wrong password and unknown
   user both 401 with the same body in ~40 ms; a 10,000-iteration hash was
   upgraded to 100,000 on login. Committed.
+- 2.4 Identity publishes `/.well-known/openid-configuration` and
+  `/.well-known/jwks.json` (public x/y only, no `d`). Gateway: JwtBearer
+  with `MetadataAddress` (keys fetched, cached, refetched on unknown kid),
+  `ValidIssuer`/`ValidAudience`, `ValidAlgorithms` = ES256 only, 30 s clock
+  skew, `MapInboundClaims` off; `FallbackPolicy` = authenticated (deny by
+  default); route policies: `/api/users/**` anonymous, `/api/payments/**`
+  `payments` (Customer or Merchant). Health endpoints `AllowAnonymous`.
+  Middleware order fixed so 401/403 are ProblemDetails. Decision 21 + two
+  Q&A entries. Verified: no token 401; Customer 200; Merchant 200; Ops
+  (valid) 403; tampered payload, `alg: none`, garbage all 401 ("The
+  signature is invalid"); login and health anonymous; unknown route 401.
+  Committed.
 
 ## Environment notes
 
@@ -298,7 +310,8 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 2, Module 2.4 — Gateway validates JWTs; customer / merchant / ops
-roles** (public key via JWKS, a tampered token refused at the edge).
+**Phase 2 wrap-up** (README Phase 2 section, DESIGN §5 rows, RUNNING.md
+update for Identity), then **Phase 3, Module 3.1 — PSP simulator:
+`authorize` with test cards.**
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.
