@@ -51,7 +51,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 12 / 67 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 13 / 67 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -60,7 +60,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 0 | [Design](#phase-0-design) | requirements, estimates (+ corrections), HLD | 1 / 2 | 🔄 |
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
-| 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 0 / 6 | ⬜ |
+| 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 1 / 6 | 🔄 |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 0 / 7 | ⬜ |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
@@ -102,7 +102,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 
 | | Module | What it builds | Concept |
 |---|---|---|---|
-| ⬜ | 3.1 | PSP sim: `authorize` with test cards | the outside world |
+| ✅ | 3.1 | PSP sim: `authorize` with test cards | the outside world |
 | ⬜ | 3.2 | `capture` + `void`, authorization holds | two-phase card payments |
 | ⬜ | 3.3 | `status` lookup + idempotency on the PSP side | provider-side dedupe |
 | ⬜ | 3.4 | Failure injection (latency, 5xx, timeout-after-success) | testing partial failure |
@@ -308,6 +308,19 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   signature is invalid"); login and health anonymous; unknown route 401.
   Committed.
 
+**Phase 3 — PSP Simulator + Vault. In progress.**
+- 3.1 `PayX.PspSimulator` (port 7088, no Gateway route, uses none of
+  PayX.Contracts' types): `POST /api/psp/authorizations` (amount in minor
+  units + currency, card, merchantId). `CardNetwork`: Luhn check + brand
+  from BIN (Visa 4, Mastercard 51–55; others `card_not_supported`).
+  `IssuerBank`: Stripe-style test cards (…0002 generic decline, …9995
+  insufficient funds, …0069 expired, …0127 incorrect CVC), expiry through
+  the last day of the month, 5,000.00 default credit limit. Declines are
+  200 with `status: declined` + `declineCode` (a business answer, never
+  worth retrying), malformed cards 400. Response has last 4 only. No
+  storage yet (3.2). Verified: 13 scenarios, all as expected; no full card
+  number in the service log. Committed.
+
 ## Environment notes
 
 - **Git Bash rewrites container paths.** `docker exec payx-kafka /opt/kafka/bin/…`
@@ -316,7 +329,7 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 3, Module 3.1 — PSP simulator: `authorize` with test cards** (the
-outside world: payment provider + card network + issuer bank).
+**Phase 3, Module 3.2 — PSP simulator remembers authorizations: `capture` +
+`void`, holds on available credit** (two-phase card payments).
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.

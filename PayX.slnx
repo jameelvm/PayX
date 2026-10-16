@@ -4,6 +4,7 @@
     <Project Path="src/services/PayX.Gateway/PayX.Gateway.csproj" />
     <Project Path="src/services/PayX.Identity/PayX.Identity.csproj" />
     <Project Path="src/services/PayX.Payment/PayX.Payment.csproj" />
+    <Project Path="src/services/PayX.PspSimulator/PayX.PspSimulator.csproj" />
   </Folder>
   <Folder Name="/src/shared/">
     <Project Path="src/shared/PayX.Contracts/PayX.Contracts.csproj" />

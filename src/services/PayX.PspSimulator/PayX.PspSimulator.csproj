@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <!-- ServiceDefaults only (host wiring, health). Its API deliberately uses
+       none of PayX.Contracts' types (not even Money): this service plays a
+       third-party provider, whose API is its own contract, not ours. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\shared\PayX.ServiceDefaults\PayX.ServiceDefaults.csproj" />
+  </ItemGroup>
+
+</Project>
