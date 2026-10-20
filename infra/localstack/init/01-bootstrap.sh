@@ -5,7 +5,7 @@
 # Each resource has exactly one owning service (CLAUDE.md architecture table):
 #
 #   alias/payx-card-vault   (KMS)       -> Vault: the key that wraps the per-card
-#                                          data keys (envelope encryption, Module 3.5)
+#                                          data keys (envelope encryption, Module 3.6)
 #   payx-card-vault         (DynamoDB)  -> Vault: token -> encrypted card record
 #   payx-risk-decisions     (DynamoDB)  -> Risk: one item per scored payment
 #   payx-settlement-files   (S3)        -> written by the PSP simulator, read by

@@ -16,6 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="AWSSDK.Extensions.NETCore.Setup" Version="4.0.102.5" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
   </ItemGroup>
 

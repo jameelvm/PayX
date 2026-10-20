@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Amazon.Runtime;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -55,6 +56,27 @@ public static class ServiceDefaultsExtensions
             // balancer is waiting on it. Give up after 2 seconds.
             timeout: TimeSpan.FromSeconds(2)));
 
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers an AWS SDK client configured from the <c>AWS</c> section.
+    /// Locally <c>AWS:ServiceURL</c> points at LocalStack; on AWS it is absent
+    /// and the SDK finds the real endpoint and the task role's credentials.
+    /// Same client, same calls, either way.
+    /// </summary>
+    public static WebApplicationBuilder AddAwsClient<TService>(this WebApplicationBuilder builder)
+        where TService : IAmazonService
+    {
+        var options = builder.Configuration.GetAWSOptions();
+
+        // LocalStack accepts any credentials, but the SDK still needs some to
+        // sign with. Only when an endpoint override is set, so a real
+        // deployment can never fall back to these.
+        if (options.DefaultClientConfig.ServiceURL is not null)
+            options.Credentials = new BasicAWSCredentials("test", "test");
+
+        builder.Services.AddAWSService<TService>(options);
         return builder;
     }
 

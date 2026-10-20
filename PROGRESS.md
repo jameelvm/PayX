@@ -28,6 +28,7 @@ tracker*, *Current state* and
    the owner approves and it is committed.
 6. **Immediately before every commit:** `dotnet build PayX.slnx
    --no-incremental` (0 warnings, 0 errors) and `dotnet test PayX.slnx`,
+   (needs LocalStack up: Vault's tests call its KMS),
    then `git diff --cached --stat` to check that only expected files are
    staged. Added after commit `bd1a26f` shipped a broken build: an editor
    save removed Identity's JWT package reference 26 s before the commit, and
@@ -51,7 +52,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 17 / 68 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 18 / 68 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -60,7 +61,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 0 | [Design](#phase-0-design) | requirements, estimates (+ corrections), HLD | 1 / 2 | 🔄 |
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
-| 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 5 / 7 | 🔄 |
+| 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 6 / 7 | 🔄 |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 0 / 7 | ⬜ |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
@@ -107,7 +108,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 3.3 | `capture` + `void` | two-phase card payments |
 | ✅ | 3.4 | `status` lookup + idempotency on the PSP side | provider-side dedupe |
 | ✅ | 3.5 | Failure injection (latency, 5xx, timeout-after-success) | testing partial failure |
-| ⬜ | 3.6 | Vault: KMS envelope encryption of one card number | envelope encryption |
+| ✅ | 3.6 | Vault: KMS envelope encryption of one card number | envelope encryption |
 | ⬜ | 3.7 | Vault: tokenize / detokenize API, CVV never stored | tokenization, PCI scope |
 
 ### Phase 4: Payment core
@@ -381,6 +382,22 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   2.02 s; `latency=1000, error=502` → 502 in 1.01 s; four bad values → 400;
   GET with 503 → 503; no client timeout → dropped at 60.03 s (curl 56);
   flag off → header ignored (200). Committed.
+- 3.6 New service `PayX.Vault` (port 7084, no endpoints yet) and
+  `CardEncryptor`: `GenerateDataKey` (AES_256) per card → AES-256-GCM
+  locally (12-byte nonce, 16-byte tag) → store ciphertext + encrypted data
+  key + the wrapping key's ARN (`EncryptedCard`); clear key zeroed after
+  use. Decrypt: KMS `Decrypt` with the stored ARN, then GCM. Record id
+  bound as KMS encryption context and GCM associated data.
+  `AddAwsClient<T>()` in ServiceDefaults (LocalStack via `AWS:ServiceURL`,
+  dummy credentials only when an override is set). New test project
+  `PayX.Vault.Tests`, integration tests against LocalStack KMS. Decision 26,
+  two failure-mode rows. Verified: 5/5 tests green (round trip; stored
+  form has no card number, length = 12 + 16 + 16, key recorded as an
+  `arn:aws:kms:` ARN not the alias; same card twice → different data key
+  and ciphertext; one flipped bit → `AuthenticationTagMismatchException`;
+  blob decrypted as another record → KMS `InvalidCiphertextException`);
+  host starts on 7084, live/ready 200 (ready has no checks yet: KMS and
+  DynamoDB readiness come with 3.7). Committed.
 
 ## Environment notes
 
@@ -390,8 +407,10 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 3, Module 3.6 — Vault: KMS envelope encryption of one card number**
-(data key from KMS, card encrypted locally with it, only the encrypted data
-key stored; recall the LocalStack-restart caveat from 1.3).
+**Phase 3, Module 3.7 — Vault: tokenize / detokenize API, CVV never stored**
+(card → `payx-card-vault` DynamoDB item keyed by token, using 3.6's
+`CardEncryptor`; KMS + DynamoDB readiness checks; recall the
+LocalStack-restart caveat from 1.3: cards encrypted before a restart become
+undecryptable).
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.

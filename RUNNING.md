@@ -79,6 +79,11 @@ Ops accounts can't self-register; create one in psql as an admin would
 dotnet test PayX.slnx
 ```
 
+`PayX.Vault.Tests` are integration tests against LocalStack's KMS, so
+`docker compose up -d localstack` first (Module 3.6). They fail, rather
+than skip, when it is down: a crypto test that silently skips is worse
+than one that fails.
+
 ## Windows / Git Bash notes
 
 - Git Bash rewrites absolute container paths (`/opt/kafka/...` becomes
