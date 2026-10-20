@@ -51,7 +51,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 16 / 68 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 17 / 68 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -60,7 +60,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 0 | [Design](#phase-0-design) | requirements, estimates (+ corrections), HLD | 1 / 2 | 🔄 |
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
-| 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 4 / 7 | 🔄 |
+| 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 5 / 7 | 🔄 |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 0 / 7 | ⬜ |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
@@ -106,7 +106,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 3.2 | PSP sim remembers authorizations as holds on available credit | an authorization is a reservation; races on balances |
 | ✅ | 3.3 | `capture` + `void` | two-phase card payments |
 | ✅ | 3.4 | `status` lookup + idempotency on the PSP side | provider-side dedupe |
-| ⬜ | 3.5 | Failure injection (latency, 5xx, timeout-after-success) | testing partial failure |
+| ✅ | 3.5 | Failure injection (latency, 5xx, timeout-after-success) | testing partial failure |
 | ⬜ | 3.6 | Vault: KMS envelope encryption of one card number | envelope encryption |
 | ⬜ | 3.7 | Vault: tokenize / detokenize API, CVV never stored | tokenization, PCI scope |
 
@@ -365,6 +365,22 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   capture-vs-void race still one winner (9 rounds). **Found:** `jsonb`
   re-sorted keys, so replays weren't byte-identical; column switched to
   `text` (uncommitted migration rolled back and regenerated). Committed.
+- 3.5 `X-Psp-Fault` header on every authorizations endpoint
+  (`[FaultInjectable]`, `Api/FaultInjection.cs`), honoured only when
+  `Psp:FaultInjection:Enabled` (true in `appsettings.Development.json`).
+  `latency=ms` (≤ 60 s) and `error=5xx` run in an action filter ordered
+  *before* `[Idempotent]`; `timeout-after-success` is a result filter that
+  runs *after* the commit, hangs until the caller gives up (cap 60 s) and
+  drops the connection. Values combine (`latency=1000, error=502`); bad
+  values → 400 `invalid_fault`. Decision 25; two failure-mode rows.
+  Verified: timeout-after-success with `curl -m 3` → curl exit 28, status
+  lookup shows `authorized`, same-key retry → 200 `Idempotent-Replayed`, a
+  $2,000.01 follow-up on the $5,000 card declines (one $3,000 hold, not
+  two); same on capture → `captured`, retry replays; `error=503` → 503, then
+  the same key runs for real (200, no replay header); `latency=2000` →
+  2.02 s; `latency=1000, error=502` → 502 in 1.01 s; four bad values → 400;
+  GET with 503 → 503; no client timeout → dropped at 60.03 s (curl 56);
+  flag off → header ignored (200). Committed.
 
 ## Environment notes
 
@@ -374,7 +390,8 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 3, Module 3.5 — PSP failure injection** (latency, 5xx, and
-timeout-after-success on demand, so later phases can prove they cope).
+**Phase 3, Module 3.6 — Vault: KMS envelope encryption of one card number**
+(data key from KMS, card encrypted locally with it, only the encrypted data
+key stored; recall the LocalStack-restart caveat from 1.3).
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.

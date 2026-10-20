@@ -34,7 +34,7 @@ public sealed record AuthorizationResponse(
         a.AuthorizationCode, a.DeclineCode, a.Brand, a.Last4, a.AmountMinor, a.CapturedAmountMinor, a.Currency);
 }
 
-[ApiController]
+[ApiController, FaultInjectable]
 [Route("api/psp/authorizations")]
 public sealed class AuthorizationsController(Authorizer authorizer, AuthorizationActions actions, PspDbContext db)
     : ControllerBase
