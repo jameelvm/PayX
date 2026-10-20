@@ -191,6 +191,7 @@ NAT Gateway dominate); for learning, deploy, run the drills and tear it down.
 | 24 | **Idempotency = claim the key, do the work, store the answer, all in one transaction**; replay the stored answer byte for byte | Accepted (Module 3.4, PSP side; PayX's own endpoints follow the same shape in 4.5) | One transaction means no "work done, key not saved" window. Claiming the key first (an INSERT on its primary key) makes a concurrent duplicate *wait* on the unique index and then replay, so the work runs once: 10 simultaneous identical requests gave 1 authorization and 9 replays. Every answer the endpoint gave is stored (success, decline, 404, 409) so a retry sees the same thing; validation failures (rejected before running) and crashes (rolled back) are not stored, so a fixed or retried request runs for real. Same key + different request → 422. Body stored as `text`: `jsonb` re-sorts keys, so replays were the same data in different bytes | Check-then-insert ("does this key exist?" then work): races, both run; storing the key after the work in a separate commit: a crash between them runs the work twice on retry; dedupe on amount + card + time window: refuses legitimate repeat purchases |
 | 25 | **Failure injection is per request, by header** (`X-Psp-Fault: latency=ms, error=5xx, timeout-after-success`), Development only, implemented as an MVC filter placed *around* the idempotency filter | Accepted (Module 3.5) | Per request so one call can be broken while everything else stays normal: a drill or test says exactly which call fails, and nothing leaks into the next test. Where each fault sits is the point: `latency` and `error` run *before* `[Idempotent]`, so an injected 5xx claims no key and does no work (verified: a retry with the same key runs for real, no replay); `timeout-after-success` runs as a result filter *after* the commit, so the hold or capture is real but the reply never arrives (verified: caller times out, status lookup shows `authorized`/`captured`, same-key retry replays the 200). The server hangs until the caller gives up (capped at 60 s), then drops the connection | Global fault rates (`fail 20 %`): realistic chaos but unrepeatable, and it breaks unrelated calls; a fault middleware: can't sit between the key claim and the commit, and runs after MVC may already be writing the body; fault code inside each action: mixes test plumbing into card logic, and runs too late (key claimed) for a clean 5xx |
 | 26 | **Envelope encryption: one fresh KMS data key per card**, card encrypted locally with AES-256-GCM; stored: ciphertext (nonce + data + tag), the KMS-encrypted data key, and the ARN of the KMS key that wrapped it. Both layers bound to the record id (KMS encryption context + GCM associated data) | Accepted (Module 3.6) | The KMS key never leaves KMS and no card number is ever sent to it; a stolen table is ciphertext plus encrypted keys, useless without `kms:Decrypt`, which IAM grants to Vault's role only and CloudTrail logs per call. One data key per card limits what one leaked key exposes to one card. GCM detects tampering (a flipped bit throws instead of returning a wrong number). The record-id binding stops a blob being copied into another card's record (verified: KMS refuses with `InvalidCiphertextException`). The key ARN is stored, not the alias, so re-pointing the alias at a new key doesn't orphan old cards. Cost: one KMS call per encrypt and per decrypt | Encrypting the card directly with KMS `Encrypt` (every byte goes to KMS, 4 KB limit, the same key for everything); one long-lived data key in config (one leak exposes every card, no per-call audit); AES-CBC (no integrity: tampering decrypts to garbage silently); Postgres `pgcrypto` (key reaches the database server); data-key caching (AWS Encryption SDK) to cut KMS calls at high volume: a later optimisation, traded against wider exposure per key |
+| 27 | **Tokenization: random tokens, no endpoint ever returns a card number, CVC never accepted for storage** | Accepted (Module 3.7) | Every service but Vault handles `tok_…` + brand + last4 + expiry, so only Vault is in PCI DSS scope. Tokens are 128 random bits, not a hash of the number: they reveal nothing and can't be recomputed from a stolen card list. Detokenize is a C# method used only by Vault's own call to the PSP (Phase 4, Payment → Vault → PSP); an HTTP detokenize endpoint would hand card numbers to every caller and pull them back into scope. `TokenizeRequest` has no CVC and refuses unknown JSON fields, so sending `cvc` is a 400, not a silent drop. DynamoDB put is conditional (`attribute_not_exists`) so a token collision fails rather than overwriting another customer's card. Display details sit in the clear next to the ciphertext, so showing "Visa •••• 4242" never costs a KMS call | Detokenize over HTTP to Payment (Payment enters PCI scope); format-preserving tokens that look like card numbers (useful for legacy systems that validate the format; not needed here, and easily confused with real numbers); hashing the number as the token (a 16-digit number with a known BIN has too little entropy: it can be brute-forced); silently ignoring a CVC (the caller believes it was stored) |
 
 **Decision 17 notes: known limits of `Money`, deliberately left for later**
 
@@ -293,6 +294,7 @@ also a one-module experiment if we ever want to compare the two.)
 | Capture and void racing on one authorization (PSP side) | Both succeed: charged and released at once | Optimistic concurrency on `xmin`; loser gets 409 (decision 23) | ✅ Module 3.3 |
 | Vault table or backup leaked | Every card number readable | Envelope encryption: only ciphertext and KMS-encrypted data keys are stored; reading needs `kms:Decrypt`, granted to Vault's role only, logged per call (decision 26) | Encryption ✅ 3.6 (IAM and CloudTrail: AWS only) |
 | Encrypted card copied into another record (insider with table write access) | Charges land on the wrong card | Record id bound into KMS encryption context and GCM associated data | ✅ 3.6 (KMS refuses) |
+| KMS or DynamoDB unavailable (Vault) | Card can't be tokenized or read; requests fail slowly | Readiness checks `kms:card-vault` and `dynamodb:card-vault` (2 s timeout) take Vault out of rotation; liveness stays up so it isn't restarted | ✅ 3.7 (`docker stop payx-localstack`: ready 503 naming both, live 200) |
 | Concurrent authorizations on one card (PSP side) | Credit reserved twice: $10,001 held on a $5,000 card | Row lock on the card account during check-and-hold (decision 22) | ✅ Module 3.2 |
 
 ## §3 Q&A bank (seed — from the doc's own prompts)
@@ -341,6 +343,34 @@ also a one-module experiment if we ever want to compare the two.)
   may not do this": a valid Ops token on the payments route. Retrying with
   the same identity never helps. Despite its name, 401 is about
   *authentication*; 403 is about *authorization*.
+- *Authorization vs capture: why two steps?* (Modules 3.2–3.3)
+  Authorization asks the issuer to *reserve* the amount on the card's
+  available credit; nothing moves yet. Capture moves it, for up to the
+  authorized amount; void releases the hold. Shops authorize at checkout
+  and capture at shipping, so an out-of-stock item is voided, not refunded
+  (no fees, no money in flight). Holds expire (typically 7 days), which is
+  why a capture deadline job exists (11.9).
+- *Two requests race to spend the same credit. What stops both winning?*
+  (3.2) The check and the hold are one transaction under a row lock on the
+  card account. Measured: without the lock, 25 simultaneous $1,000
+  authorizations held $10,001 on a $5,000 card; with it, $4,001.
+- *The PSP call timed out. Was the customer charged?* (3.4–3.5) Unknown,
+  and it must be treated as unknown, not as failed. Two safe ways to find
+  out: look the authorization up by id/reference, or retry with the **same**
+  idempotency key, which replays the original answer instead of charging
+  again. A new key would be a new charge. Demonstrable with
+  `X-Psp-Fault: timeout-after-success`.
+- *Why not encrypt card numbers with KMS directly?* (3.6) KMS `Encrypt`
+  sends the data to KMS, has a 4 KB limit and uses one key for everything.
+  Envelope encryption asks KMS for a per-card data key, encrypts locally,
+  and stores only the wrapped key: the master key never leaves KMS, each
+  decryption is an audited KMS call, and one leaked data key exposes one card.
+- *What is a token, and how does it shrink PCI scope?* (3.7) A random
+  stand-in for the card number, meaningless outside the vault. Services
+  that only ever see tokens don't store, process or transmit card data, so
+  they fall outside PCI DSS's strictest requirements; only the vault (and
+  its call to the PSP) stays in scope. A token is random; a fingerprint is a
+  keyed hash used to recognise the same card. Different jobs.
 - *How does the Gateway get Identity's public key, and what happens on key
   rotation?* It reads Identity's OIDC discovery document, follows
   `jwks_uri`, and caches the keys. Every token names its key in `kid`. When
@@ -354,6 +384,8 @@ also a one-module experiment if we ever want to compare the two.)
 - Temporal or AWS Step Functions as the saga engine — a possible late phase to
   contrast with the hand-rolled orchestrator.
 - Multi-currency and FX — out of scope initially (single currency per merchant).
+- **Where the CVC travels** (from 3.7): Vault refuses to store it, but the PSP needs it for the first authorization. Options for Phase 4: the browser sends it with the pay request and Payment passes it to Vault's PSP call in memory (Payment sees it briefly), or Vault holds it encrypted in Redis with a TTL of minutes until that authorization (what commercial vaults do; PCI DSS allows CVC only until authorization completes).
+- Card fingerprint in Vault (`DESIGN.md` schema lists it): an HMAC of the number to recognise the same card across tokens. Not needed until Risk counts per-card velocity (5.2).
 - 3-D Secure challenge flow — modelled as a `CHALLENGED` state; full flow deferred.
 - Multi-PSP routing / failover — mention only, unless time allows.
 - Payouts from merchant available balance to bank — deferred.
@@ -384,3 +416,9 @@ every phase; rows for later phases are added when they land.
 | `authenticateUser(username, password)` (ch.2) | 2.3 | [`Identity/Services/UserAuthentication.cs`](src/services/PayX.Identity/Services/UserAuthentication.cs), [`TokenIssuer.cs`](src/services/PayX.Identity/Services/TokenIssuer.cs) |
 | "The user authentication service verifies the customer's identity" before payment (ch.2 detailed design) | 2.4 | [`Gateway/Program.cs`](src/services/PayX.Gateway/Program.cs) (JwtBearer, policies), [`Identity/Api/WellKnownController.cs`](src/services/PayX.Identity/Api/WellKnownController.cs) (JWKS) |
 | Security NFR: secure storage, encryption, least privilege (ch.1) | 2.2–2.4 | salted PBKDF2 hashes; asymmetric token signing; deny-by-default authorization |
+| Payment gateway / PSP, card network, issuer (ch.2 HLD) | 3.1 | [`PspSimulator/Api/AuthorizationsController.cs`](src/services/PayX.PspSimulator/Api/AuthorizationsController.cs), [`Domain/CardNetwork.cs`](src/services/PayX.PspSimulator/Domain/CardNetwork.cs), [`Domain/IssuerBank.cs`](src/services/PayX.PspSimulator/Domain/IssuerBank.cs) |
+| Card flow phase 1, authorize = reserve funds (ch.2) | 3.2 | [`PspSimulator/Services/Authorizer.cs`](src/services/PayX.PspSimulator/Services/Authorizer.cs) (row lock, derived available credit) |
+| Card flow phase 2, capture/settle; void (ch.2) | 3.3 | [`PspSimulator/Domain/Authorization.cs`](src/services/PayX.PspSimulator/Domain/Authorization.cs), [`Services/AuthorizationActions.cs`](src/services/PayX.PspSimulator/Services/AuthorizationActions.cs) |
+| Idempotency for transient failures (ch.2), provider side; status lookup | 3.4 | [`PspSimulator/Api/IdempotentAttribute.cs`](src/services/PayX.PspSimulator/Api/IdempotentAttribute.cs), [`Domain/IdempotencyRecord.cs`](src/services/PayX.PspSimulator/Domain/IdempotencyRecord.cs) |
+| Transient failures: timeouts, 5xx (ch.2), made reproducible | 3.5 | [`PspSimulator/Api/FaultInjection.cs`](src/services/PayX.PspSimulator/Api/FaultInjection.cs) |
+| Card details: tokenized, never stored outside the vault; CVV never stored (ch.2) | 3.7 | [`Vault/Services/CardVault.cs`](src/services/PayX.Vault/Services/CardVault.cs), [`Api/CardsController.cs`](src/services/PayX.Vault/Api/CardsController.cs), [`Repositories/CardRepository.cs`](src/services/PayX.Vault/Repositories/CardRepository.cs) |

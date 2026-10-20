@@ -52,7 +52,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 18 / 68 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 19 / 68 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -61,7 +61,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 0 | [Design](#phase-0-design) | requirements, estimates (+ corrections), HLD | 1 / 2 | 🔄 |
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
-| 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 6 / 7 | 🔄 |
+| 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 0 / 7 | ⬜ |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
@@ -109,7 +109,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 3.4 | `status` lookup + idempotency on the PSP side | provider-side dedupe |
 | ✅ | 3.5 | Failure injection (latency, 5xx, timeout-after-success) | testing partial failure |
 | ✅ | 3.6 | Vault: KMS envelope encryption of one card number | envelope encryption |
-| ⬜ | 3.7 | Vault: tokenize / detokenize API, CVV never stored | tokenization, PCI scope |
+| ✅ | 3.7 | Vault: tokenize / detokenize API, CVV never stored | tokenization, PCI scope |
 
 ### Phase 4: Payment core
 
@@ -310,7 +310,7 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   signature is invalid"); login and health anonymous; unknown route 401.
   Committed.
 
-**Phase 3 — PSP Simulator + Vault. In progress.**
+**Phase 3 — PSP Simulator + Vault. Complete: all seven modules built, verified and committed.** Wrap-up done: README Phase 3 section, RUNNING.md (PSP simulator + Vault), DESIGN §3 Q&A and §5 rows.
 - 3.1 `PayX.PspSimulator` (port 7088, no Gateway route, uses none of
   PayX.Contracts' types): `POST /api/psp/authorizations` (amount in minor
   units + currency, card, merchantId). `CardNetwork`: Luhn check + brand
@@ -398,6 +398,28 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   blob decrypted as another record → KMS `InvalidCiphertextException`);
   host starts on 7084, live/ready 200 (ready has no checks yet: KMS and
   DynamoDB readiness come with 3.7). Committed.
+- 3.7 Tokenization. `POST /api/vault/cards` {number, expMonth, expYear} →
+  201 + `Location` {token, brand, last4, expMonth, expYear};
+  `GET /api/vault/cards/{token}` same shape, 404 `card_not_found`.
+  `CardVault`: token (`tok_` + 128 random bits) created first, card
+  encrypted bound to it (3.6), DynamoDB `PutItem` with
+  `attribute_not_exists(token)`; `DetokenizeAsync` is a C# method only (no
+  HTTP endpoint returns a card number). `TokenizeRequest` has no CVC and
+  `JsonUnmappedMemberHandling.Disallow`. `CardNumber` (Luhn, display brand).
+  Readiness `kms:card-vault` (DescribeKey via alias, enabled) and
+  `dynamodb:card-vault` (DescribeTable, ACTIVE), 2 s timeout. No Gateway
+  route. Decision 27, failure-mode row, two open questions (CVC path, card
+  fingerprint). Verified: 4 new integration tests (tokenize → detokenize
+  round trip; stored item has exactly the 9 expected attributes, no number,
+  no CVC; same card twice → two tokens; unknown token → null), 9/9 Vault
+  tests; over HTTP: 201 + Location, lookup 200, unknown 404, `cvc` → 400,
+  bad Luhn → 400 `invalid_number` (number not echoed), Mastercard brand;
+  `docker stop payx-localstack` → ready 503 naming both checks, live 200,
+  back to 200 after restart; 0 card numbers in the log. **Found:** after
+  the LocalStack restart the key id changed and the table was empty, so the
+  earlier token → 404 (the 1.3 caveat, now observed; documented in
+  RUNNING.md). Phase 3 wrap-up: README Phase 3 section, RUNNING.md (PSP +
+  Vault), DESIGN §3 Q&A (5) and §5 rows. Committed.
 
 ## Environment notes
 
@@ -407,10 +429,8 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 3, Module 3.7 — Vault: tokenize / detokenize API, CVV never stored**
-(card → `payx-card-vault` DynamoDB item keyed by token, using 3.6's
-`CardEncryptor`; KMS + DynamoDB readiness checks; recall the
-LocalStack-restart caveat from 1.3: cards encrypted before a restart become
-undecryptable).
+**Phase 4, Module 4.1 — `payments` table + state machine with legal
+transitions** (PayX's own payment service; first decide the CVC path, see
+DESIGN §4).
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.

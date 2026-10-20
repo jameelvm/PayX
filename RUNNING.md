@@ -73,6 +73,43 @@ curl localhost:7082/health/ready                                          # post
 Ops accounts can't self-register; create one in psql as an admin would
 (see PROGRESS.md, Module 2.4).
 
+### PSP simulator and Vault (Phase 3)
+
+```bash
+# terminal 5: PSP simulator (applies its migrations on start; Postgres)
+dotnet run --project src/services/PayX.PspSimulator --launch-profile "PspSimulator (local)"
+
+# terminal 6: Vault (KMS + DynamoDB in LocalStack, so start localstack first)
+dotnet run --project src/services/PayX.Vault --launch-profile "Vault (local)"
+```
+
+Neither has a Gateway route: only PayX's own services call them.
+
+```bash
+# authorize (every POST needs an Idempotency-Key), then look it up
+curl -X POST localhost:7088/api/psp/authorizations -H "Content-Type: application/json" \
+  -H "Idempotency-Key: demo-1" \
+  -d '{"amount":3000,"currency":"USD","card":{"number":"4242424242424242","expMonth":12,"expYear":2030,"cvc":"123"},"merchantId":"m_1"}'
+curl localhost:7088/api/psp/authorizations/<authorizationId>
+
+# make one call misbehave (Development only): latency=ms, error=5xx, timeout-after-success
+curl -m 3 -X POST localhost:7088/api/psp/authorizations -H "X-Psp-Fault: timeout-after-success" ...
+
+# tokenize a card; nothing but the token, brand, last4 and expiry ever comes back
+curl -X POST localhost:7084/api/vault/cards -H "Content-Type: application/json" \
+  -d '{"number":"4242 4242 4242 4242","expMonth":12,"expYear":2030}'
+curl localhost:7084/health/ready     # kms:card-vault + dynamodb:card-vault
+```
+
+Test cards (simulator): `4242424242424242` approves; `4000000000000002`
+generic decline, `4000000000009995` insufficient funds, `4000000000000069`
+expired, `4000000000000127` incorrect CVC.
+Each card number has a $5,000 limit that holds and captures use up, so
+repeated demos on one card eventually decline: use a fresh Luhn-valid number.
+
+**LocalStack is not persistent.** Restarting it creates a new KMS key and an
+empty `payx-card-vault` table, so every token from before the restart is gone.
+
 ## 4. Tests
 
 ```bash

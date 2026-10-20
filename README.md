@@ -306,3 +306,196 @@ route by default, and separates "who are you?" (401) from "you may not"
 (403). Phase 3 builds the outside world: the payment provider, card
 network and bank, and the vault that keeps card numbers out of everything
 else.
+
+---
+
+## Phase 3 — PSP Simulator + Vault
+
+**What the phase delivers:** the outside world PayX pays through, and the
+one place card numbers live. The PSP simulator (:7088) plays Stripe/Adyen,
+the card network and the issuing bank in one service: it authorizes,
+captures and voids, dedupes retries by idempotency key, and can be told to
+fail in exactly the ways real networks do. The Vault (:7084) turns a card
+number into a token with KMS envelope encryption, so no other service ever
+handles the number.
+
+```
+ checkout ─► Vault: tokenize ─► KMS data key ─► AES-GCM ─► DynamoDB payx-card-vault
+                 └─ returns tok_…, brand, last4 (all anyone else ever sees)
+
+ Phase 4:  Payment ─(tok_…)─► Vault: detokenize ─► PSP simulator
+                                                     ├─ CardNetwork: Luhn, brand
+                                                     ├─ IssuerBank: test cards, expiry, credit
+                                                     ├─ hold on available credit (row lock)
+                                                     └─ capture / void (two-phase)
+           every POST carries an Idempotency-Key; X-Psp-Fault can break any call on purpose
+```
+
+### 3.1 The outside world: authorize with test cards
+
+**Built:** `PayX.PspSimulator`, `POST /api/psp/authorizations`: Luhn check
+and brand from the BIN (card network), then Stripe-style test cards for
+generic decline, insufficient funds, expired card and incorrect CVC (issuer).
+
+**Why:** every reliability lesson later in the build needs a counterparty
+we control. The simulator deliberately uses none of PayX's own types, not
+even `Money`: a real provider's API is its contract, not ours. A decline is
+a **200** with `status: declined` and a code, because the request was
+understood and the answer was "no"; a malformed card is a 400.
+
+**Verify:** 13 scenarios (each test card, bad Luhn, unsupported brand, past
+expiry); no full card number in the log.
+
+**Talking point:** decline vs error is the first retry decision. An error
+(5xx, timeout) may succeed on retry; a decline never will: the same card
+gets the same answer, and hammering the issuer looks like card testing.
+
+### 3.2 An authorization is a hold on available credit
+
+**Built:** the simulator's own database `payx_psp`: `card_accounts` (an HMAC
+fingerprint of the card, never the number, plus a credit limit) and
+`authorizations`. Available credit = limit − live holds, computed, never
+stored. The check and the hold happen in one transaction under
+`SELECT … FOR UPDATE` on the card account.
+
+**Why:** authorizing reserves money without moving it, the first half of
+the doc's two-phase card flow. Two simultaneous authorizations each check
+"is there enough?", both see yes, and both hold. The row lock makes the
+check and the hold one atomic step per card (decision 22).
+
+**Verify:** 25 truly simultaneous $1,000 authorizations on a $5,000 card:
+without the lock $6,001 and $10,001 held, with it $4,001 every time.
+(Parallel `curl` processes on Windows start too slowly to race; threads
+released by a barrier do.)
+
+**Talking point:** a stored "available balance" column is a second copy of
+the truth that can drift; derive it from the holds, and lock while deciding.
+
+### 3.3 Capture and void: two-phase card payments
+
+**Built:** `POST …/{id}/capture {amount}` and `…/{id}/void`. Capture moves
+the money (partial capture allowed, never more than authorized, the unused
+part is released); void releases the hold. Legal transitions live on the
+`Authorization` entity; Postgres `xmin` is the optimistic concurrency token
+(decision 23); a check constraint keeps captured ≤ authorized.
+
+**Why:** shops authorize at checkout and capture at shipping. Capture and
+void racing on one authorization is rare, so instead of locking every
+capture, both proceed and the database lets exactly one UPDATE win.
+
+**Verify:** 20 simultaneous capture-vs-void rounds: one winner each time,
+11 captured + 9 voided, never both. Capturing twice, voiding after capture
+and over-capturing are all 409.
+
+**Talking point:** pessimistic locking for hot, contended rows (a busy card
+account, 3.2); optimistic for rare conflicts on one record (this). Know
+which you have.
+
+### 3.4 Status lookup and provider-side idempotency
+
+**Built:** `GET /api/psp/authorizations/{id}`, and `[Idempotent]` on every
+POST. The filter claims the `Idempotency-Key` (INSERT on its primary key),
+runs the action and stores the status and body, **in one transaction**
+(decision 24). A duplicate waits on the unique index, then replays the
+stored answer with `Idempotent-Replayed: true`. The same key with a
+different request (HMAC of method, path, arguments) is 422; no key is 400.
+
+**Why:** this is the doc's "never charge twice" on the provider side. A
+caller whose capture timed out must be able to retry safely: without
+idempotency, the retry got 409 "already captured" (3.3) and the caller
+couldn't tell success from failure. Storing the key in a separate commit
+would leave a "work done, key not saved" window; one transaction closes it.
+
+**Verify:** 10 simultaneous identical authorizations → 1 row, 9 replays; a
+retried capture → the original 200, replayed; a stored 409 replays as 409;
+a validation 400 isn't stored, so the fixed request runs.
+
+**Talking points:** idempotency stores the *answer*, not just the key,
+including refusals. `jsonb` re-sorts keys, so replays weren't byte-identical
+until the column became `text` (found in this module).
+
+### 3.5 Failure injection
+
+**Built:** an `X-Psp-Fault` header (`latency=ms`, `error=5xx`,
+`timeout-after-success`, combinable), honoured only when
+`Psp:FaultInjection:Enabled` (Development).
+
+**Why:** the failures this system is shaped around are rare and random on
+real networks. Where each fault sits is the lesson (decision 25): `latency`
+and `error` run **before** `[Idempotent]`, so an injected 5xx claims no key
+and does no work; `timeout-after-success` is a result filter **after** the
+commit, so the hold is real and the reply never arrives.
+
+**Verify:** timeout-after-success with `curl -m 3` → curl gives up; status
+lookup shows `authorized`; the same key replays the 200; a $2,000.01
+follow-up on the $5,000 card declines, proving one $3,000 hold, not two.
+`error=503` → a same-key retry runs for real (no replay header).
+
+**Talking point:** "the network dropped the response — was the customer
+charged?" now has a demonstrable answer: ask by status, or retry with the
+same key. If the 503 sat inside the idempotency filter, it would be stored
+and every retry would replay the failure forever.
+
+### 3.6 Vault: envelope encryption with KMS
+
+**Built:** `PayX.Vault` and `CardEncryptor`: KMS `GenerateDataKey` gives a
+fresh AES-256 key per card, in the clear and wrapped; the card is
+encrypted locally with AES-256-GCM; only the ciphertext, the wrapped key and
+the wrapping key's ARN are kept. The record id (the token) is bound in as
+KMS encryption context and GCM associated data (decision 26).
+`AddAwsClient<T>()` in ServiceDefaults points the SDK at LocalStack.
+
+**Why:** the doc asks where card details are encrypted. The master key never
+leaves KMS and no card number is ever sent to it; a stolen table is
+ciphertext plus wrapped keys, useless without `kms:Decrypt`, which IAM
+grants to Vault only and CloudTrail logs per call. GCM, unlike CBC, detects
+tampering.
+
+**Verify:** `dotnet test tests/PayX.Vault.Tests` (LocalStack running): round
+trip; stored form has no card number; same card twice → new key and
+ciphertext; one flipped bit throws; a blob moved to another record is
+refused by KMS.
+
+**Talking point:** "why not just call KMS Encrypt on the card?" Every byte
+would go to KMS, there is a 4 KB limit, and everything shares one key.
+Envelope encryption keeps data local and keys central.
+
+### 3.7 Vault: tokenization
+
+**Built:** `POST /api/vault/cards` (number + expiry → 201 with token, brand,
+last4, expiry), `GET /api/vault/cards/{token}` (the same, never the number),
+a DynamoDB item per token written with `attribute_not_exists`, and
+`DetokenizeAsync`, a C# method only: no HTTP endpoint returns a card
+number. KMS and DynamoDB readiness checks (decision 27).
+
+**Why:** tokenization is how PCI DSS scope stays one service wide. The
+token is random (128 bits), not derived from the number, so it reveals
+nothing and can't be recomputed. The only consumer of the real number will
+be Vault's own call to the PSP (Phase 4: Payment → Vault → PSP). The
+request DTO has no CVC field and refuses unknown fields, so a client
+sending `cvc` gets a 400 instead of believing it was kept: PCI DSS forbids
+storing it, even encrypted.
+
+**Verify:** tokenize → 201 + `Location`; lookup → brand/last4 only; `cvc`
+in the body → 400; bad Luhn → 400 `invalid_number` (number not echoed);
+`docker stop payx-localstack` → ready 503 naming both checks, live still
+200; zero card numbers in the service log.
+
+**Talking points:** a token vs a fingerprint: the token is random and
+identifies one stored record; the PSP's fingerprint (3.2) is an HMAC built
+to *match* the same card across records. Without paid persistence,
+restarting LocalStack recreates the KMS key and an empty table, so old
+tokens are gone (seen in this module; real KMS keys and tables persist).
+
+### Phase 3 in one paragraph
+
+Card payments are two-phase: authorize reserves credit under a lock,
+capture moves it, void releases it, and the database, not application
+code, guarantees two racing requests can't both win. The provider
+remembers every answer under its idempotency key, so a retry after a lost
+response replays what happened instead of doing it again, and failure
+injection makes "lost response" reproducible on demand. Card numbers live
+only in the Vault, each under its own KMS data key, bound to its token;
+everything else sees a random token, the brand and the last four digits.
+Phase 4 builds PayX's own payment service on top: a state machine,
+orchestration across Vault and the PSP, and idempotency of its own.
