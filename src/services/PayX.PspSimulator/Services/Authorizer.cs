@@ -19,7 +19,12 @@ public sealed class Authorizer(PspDbContext db, IConfiguration config)
     {
         var fingerprint = Convert.ToHexString(HMACSHA256.HashData(_fingerprintKey, Encoding.UTF8.GetBytes(number)));
 
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        // Join the caller's transaction if there is one (the idempotency
+        // filter, Module 3.4, wraps the whole request in one); otherwise
+        // start our own. Either way the lock below lasts until that commit.
+        await using var ownTx = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(ct)
+            : null;
 
         // First time this card is seen: open its account. ON CONFLICT makes
         // two simultaneous first payments safe; one inserts, the other no-ops.
@@ -59,7 +64,8 @@ public sealed class Authorizer(PspDbContext db, IConfiguration config)
 
         db.Authorizations.Add(authorization);
         await db.SaveChangesAsync(ct);
-        await tx.CommitAsync(ct);   // releases the row lock; the next request for this card proceeds
+        if (ownTx is not null)
+            await ownTx.CommitAsync(ct);   // releases the row lock; the next request for this card proceeds
         return authorization;
     }
 }

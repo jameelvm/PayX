@@ -45,6 +45,10 @@ public sealed class AuthorizationActions(PspDbContext db)
         // (3.2) is the opposite case, where waiting beats failing and retrying.
         catch (DbUpdateConcurrencyException)
         {
+            // Forget our losing change, or the next SaveChanges in this request
+            // (the idempotency filter storing this 409) would try to write it
+            // again and fail the same way.
+            db.Entry(authorization).State = EntityState.Detached;
             return new ActionOutcome(authorization, "authorization_changed_concurrently");
         }
     }

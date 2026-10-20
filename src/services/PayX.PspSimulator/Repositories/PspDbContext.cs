@@ -11,9 +11,24 @@ public sealed class PspDbContext(DbContextOptions<PspDbContext> options) : DbCon
 {
     public DbSet<CardAccount> CardAccounts => Set<CardAccount>();
     public DbSet<Authorization> Authorizations => Set<Authorization>();
+    public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<IdempotencyRecord>(record =>
+        {
+            record.ToTable("idempotency_keys");
+            // The primary key *is* the de-duplication: two requests can't
+            // both insert the same key, however close together they arrive.
+            record.HasKey(r => r.Key);
+            record.Property(r => r.Key).HasMaxLength(255);
+            record.Property(r => r.RequestHash).HasMaxLength(64);
+            // text, not jsonb: jsonb re-sorts keys and re-spaces the JSON, so a
+            // replay would carry the same data in different bytes (seen in
+            // testing). A replay must be exactly what was sent the first time.
+            record.Property(r => r.ResponseBody).HasColumnType("text");
+        });
+
         modelBuilder.Entity<CardAccount>(account =>
         {
             account.ToTable("card_accounts");

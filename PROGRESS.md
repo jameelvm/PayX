@@ -51,7 +51,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 15 / 68 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 16 / 68 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -60,7 +60,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 0 | [Design](#phase-0-design) | requirements, estimates (+ corrections), HLD | 1 / 2 | 🔄 |
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
-| 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 3 / 7 | 🔄 |
+| 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 4 / 7 | 🔄 |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 0 / 7 | ⬜ |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
@@ -105,7 +105,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 3.1 | PSP sim: `authorize` with test cards | the outside world |
 | ✅ | 3.2 | PSP sim remembers authorizations as holds on available credit | an authorization is a reservation; races on balances |
 | ✅ | 3.3 | `capture` + `void` | two-phase card payments |
-| ⬜ | 3.4 | `status` lookup + idempotency on the PSP side | provider-side dedupe |
+| ✅ | 3.4 | `status` lookup + idempotency on the PSP side | provider-side dedupe |
 | ⬜ | 3.5 | Failure injection (latency, 5xx, timeout-after-success) | testing partial failure |
 | ⬜ | 3.6 | Vault: KMS envelope encryption of one card number | envelope encryption |
 | ⬜ | 3.7 | Vault: tokenize / detokenize API, CVV never stored | tokenization, PCI scope |
@@ -202,7 +202,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 
 ## Current state
 
-**Last updated:** 2026-10-06
+**Last updated:** 2026-10-19
 **Phase 0 — design. Draft written, awaiting owner review.** Source PDFs read
 (the schema/detailed-design figures are blank in the PDF export, so the
 storage schema in `DESIGN.md` is inferred from the APIs and text). Stack,
@@ -349,6 +349,22 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   final states 11 captured + 9 voided, never both. (First run reused cards
   exhausted by 3.2's tests; their authorizations were declined, so that
   run only proved declines can't be captured.) Committed.
+- 3.4 `GET /api/psp/authorizations/{id}` (status lookup, no key needed) and
+  `[Idempotent]` on authorize / capture / void: an action filter requiring
+  `Idempotency-Key` that, in one transaction, claims the key (INSERT on the
+  `idempotency_keys` primary key), runs the action, stores status + body,
+  commits. Duplicate key → wait on the unique index, then replay the stored
+  answer with `Idempotent-Replayed: true`; same key + different request
+  (HMAC of method, path, arguments) → 422; missing key → 400. `Authorizer`
+  joins the caller's transaction; a losing capture/void is detached so the
+  stored 409 can be saved. Decision 24; failure-mode row updated. Verified:
+  replay byte-identical; capture retried with its key → 200 replayed (the
+  3.3 gotcha), with a new key → 409; a stored 409 replays as 409; a
+  validation 400 isn't stored (same key then works); declines replay; 10
+  truly simultaneous identical authorizations → 1 row, 9 replays;
+  capture-vs-void race still one winner (9 rounds). **Found:** `jsonb`
+  re-sorted keys, so replays weren't byte-identical; column switched to
+  `text` (uncommitted migration rolled back and regenerated). Committed.
 
 ## Environment notes
 
@@ -358,8 +374,7 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 3, Module 3.4 — `status` lookup + idempotency on the PSP side** (a
-retried capture after a timeout must not 409 or charge twice; the caller
-can always ask "what happened?").
+**Phase 3, Module 3.5 — PSP failure injection** (latency, 5xx, and
+timeout-after-success on demand, so later phases can prove they cope).
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.

@@ -1,6 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using PayX.PspSimulator.Domain;
+using PayX.PspSimulator.Repositories;
 using PayX.PspSimulator.Services;
 
 namespace PayX.PspSimulator.Api;
@@ -34,9 +36,18 @@ public sealed record AuthorizationResponse(
 
 [ApiController]
 [Route("api/psp/authorizations")]
-public sealed class AuthorizationsController(Authorizer authorizer, AuthorizationActions actions) : ControllerBase
+public sealed class AuthorizationsController(Authorizer authorizer, AuthorizationActions actions, PspDbContext db)
+    : ControllerBase
 {
-    [HttpPost]
+    // Status lookup: "what happened to authorization X?" A read changes
+    // nothing, so asking twice is naturally safe; no idempotency key needed.
+    [HttpGet("{id}")]
+    public async Task<IActionResult> Get(string id, CancellationToken ct) =>
+        await db.Authorizations.AsNoTracking().SingleOrDefaultAsync(a => a.Id == id, ct) is { } auth
+            ? Ok(AuthorizationResponse.From(auth))
+            : Problem(statusCode: 404, title: "authorization_not_found");
+
+    [HttpPost, Idempotent]
     public async Task<IActionResult> Authorize(AuthorizeRequest request, CancellationToken ct)
     {
         var number = request.Card.Number.Replace(" ", "");
@@ -61,17 +72,18 @@ public sealed class AuthorizationsController(Authorizer authorizer, Authorizatio
         return Ok(AuthorizationResponse.From(auth));
     }
 
-    [HttpPost("{id}/capture")]
+    [HttpPost("{id}/capture"), Idempotent]
     public async Task<IActionResult> Capture(string id, CaptureRequest request, CancellationToken ct) =>
         ToResponse(await actions.CaptureAsync(id, request.Amount, ct));
 
-    [HttpPost("{id}/void")]
+    [HttpPost("{id}/void"), Idempotent]
     public async Task<IActionResult> Void(string id, CancellationToken ct) =>
         ToResponse(await actions.VoidAsync(id, ct));
 
     // 409 Conflict for a refused transition: the request is well formed, but
-    // it conflicts with the authorization's current state. Retrying the same
-    // request won't help; the caller should look up the status (3.4).
+    // it conflicts with the authorization's current state. A retry with the
+    // *same* idempotency key replays the original answer instead (3.4); a new
+    // key means a new request, and gets this 409.
     private IActionResult ToResponse(ActionOutcome result) => result switch
     {
         { NotFound: true } => Problem(statusCode: 404, title: "authorization_not_found"),
