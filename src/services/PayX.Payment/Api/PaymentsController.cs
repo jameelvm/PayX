@@ -24,16 +24,26 @@ public sealed record AmountRequest(
 public sealed record CapturePaymentRequest([Range(1, Money.MaxAmountMinor)] long? AmountMinor);
 
 public sealed record PaymentResponse(string Id, string Status, Guid MerchantId, Money Amount, string? AuthorizationCode,
-    string? DeclineCode, long? CapturedAmountMinor)
+    string? DeclineCode, long? CapturedAmountMinor, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt)
 {
     public static PaymentResponse From(Domain.Payment p) =>
-        new(p.Id, p.Status.ToString(), p.MerchantId, p.Amount, p.AuthorizationCode, p.DeclineCode, p.CapturedAmountMinor);
+        new(p.Id, p.Status.ToString(), p.MerchantId, p.Amount, p.AuthorizationCode, p.DeclineCode, p.CapturedAmountMinor,
+            p.CreatedAt, p.UpdatedAt);
 }
 
 [ApiController]
 [Route("api/payments")]
-public sealed class PaymentsController(PaymentAuthorization authorization, PaymentCapture capture) : ControllerBase
+public sealed class PaymentsController(PaymentAuthorization authorization, PaymentCapture capture, PaymentQueries queries)
+    : ControllerBase
 {
+    // Doc ch.2: checkPaymentStatus(payment_id). The customer and the merchant
+    // of a payment can both see it; for anyone else it doesn't exist (404).
+    [HttpGet("{id}"), Authorize(Roles = "Customer,Merchant")]
+    public async Task<IActionResult> Get(string id, CancellationToken ct) =>
+        await queries.FindVisibleAsync(id, Guid.Parse(User.FindFirst("sub")!.Value), ct) is { } payment
+            ? Ok(PaymentResponse.From(payment))
+            : Problem(statusCode: 404, title: "payment_not_found");
+
     // The merchant takes the money, typically when the order ships. Only the
     // payment's own merchant: the check is in PaymentCapture (404 otherwise).
     [HttpPost("{id}/capture"), Authorize(Roles = "Merchant")]
@@ -79,8 +89,10 @@ public sealed class PaymentsController(PaymentAuthorization authorization, Payme
 
         // 201 for every business outcome: Authorized, Declined and RiskBlocked
         // are all a payment that now exists, with an answer. The status field
-        // says which; like the PSP, a decline is not an HTTP error.
-        // (GET /api/payments/{id} itself arrives in 4.4.)
+        // says which; like the PSP, a decline is not an HTTP error. Location
+        // points at checkPaymentStatus, and is relative on purpose: behind
+        // the Gateway, an absolute URL built here named the internal instance
+        // (http://localhost:7082/…) instead of the Gateway (found in 4.4).
         return Created($"/api/payments/{result.Payment.Id}", PaymentResponse.From(result.Payment));
     }
 }

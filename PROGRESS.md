@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 25 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 26 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -64,7 +64,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
-| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 5 / 9 | 🔄 |
+| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 6 / 9 | 🔄 |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
@@ -122,7 +122,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 4.2b | Vault authorizes at the PSP by token | the vault as the only path to card data |
 | ✅ | 4.2c | `authorizePayment` happy path (risk stand-in) | orchestration |
 | ✅ | 4.3 | `capturePayment` | authorize vs capture |
-| ⬜ | 4.4 | `checkPaymentStatus` | status API |
+| ✅ | 4.4 | `checkPaymentStatus` | status API |
 | ⬜ | 4.5 | Idempotency-Key table: insert or return stored response | never charge twice |
 | ⬜ | 4.6 | Concurrent duplicate requests (in-progress lock) | races on retries |
 | ⬜ | 4.7 | Propagating idempotency keys to the PSP (incl. the 4.2b gap: a same-key retry through Vault must replay, not 409) | end-to-end idempotency |
@@ -543,6 +543,17 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   5,000** (the retry authorize can't do yet, 4.7). **Found by the tests:**
   reading PSP refusals with one record for both shapes threw on every 409
   (`status` is a number in ProblemDetails); now read separately. Committed.
+- 4.4 `GET /api/payments/{id}` (Customer or Merchant role): `PaymentQueries`
+  returns the payment only to its own customer or merchant; anyone else
+  gets 404 `payment_not_found`, the same as a missing id. Reads PayX's row,
+  never the PSP (that is the resolver, 6.5). `PaymentResponse` gains
+  `createdAt` / `updatedAt`. Verified: 2 new tests (customer and merchant
+  see it; a stranger and a missing id get nothing), 66/66; end to end:
+  customer 200, merchant 200, other merchant 404, no token 401, status
+  follows a capture. **Found:** the 201's `Location` named the internal
+  instance (`http://localhost:7082/…`) through the Gateway (YARP doesn't
+  forward the original host); now relative (`/api/payments/{id}`). Two
+  failure-mode rows, doc-to-code row. Committed.
 
 ## Environment notes
 
@@ -552,8 +563,5 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 4, Module 4.4 — `checkPaymentStatus`** (`GET /api/payments/{id}`:
-the customer or the merchant of a payment asks where it is; nobody else
-can see it).
-Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
-owner confirmation; nothing up to 1.7 depends on them.
+**Phase 4, Module 4.5 — Payment's own Idempotency-Key** (a double-clicked
+Pay replays the first answer instead of paying twice).

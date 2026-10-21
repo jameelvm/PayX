@@ -22,6 +22,7 @@ builder.Services.AddDbContext<PaymentsDbContext>(options => options
 
 builder.Services.AddScoped<PaymentAuthorization>();
 builder.Services.AddScoped<PaymentCapture>();
+builder.Services.AddScoped<PaymentQueries>();
 builder.Services.AddSingleton<IRiskCheck, AllowAllRiskCheck>();   // stand-in until Phase 5
 
 // Typed client for Vault. A plain timeout for now; retries and circuit
