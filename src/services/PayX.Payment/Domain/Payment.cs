@@ -66,14 +66,25 @@ public sealed class Payment
         DeclineCode = declineCode;
     }
 
+    /// <summary>
+    /// Why this capture would be refused, or null if it's fine. Asked
+    /// <em>before</em> calling the PSP (4.3): a capture the PSP performs but
+    /// we then refuse to record would be money moved with no record of it.
+    /// </summary>
+    public string? CaptureRefusal(Money amount)
+    {
+        if (!PaymentStateMachine.CanMove(Status, PaymentStatus.Captured)) return "payment_not_capturable";
+        if (amount.Currency != Amount.Currency) return "currency_mismatch";
+        if (amount.AmountMinor <= 0 || amount.AmountMinor > Amount.AmountMinor) return "amount_exceeds_authorized";
+        return null;
+    }
+
     /// <summary>Partial capture allowed (ship 2 of 3 items), never more than authorized.</summary>
     public void Capture(Money amount)
     {
         EnsureCanMoveTo(PaymentStatus.Captured);
-        if (amount.Currency != Amount.Currency)
-            throw new ArgumentException($"Capture in {amount.Currency} for a {Amount.Currency} payment", nameof(amount));
-        if (amount.AmountMinor <= 0 || amount.AmountMinor > Amount.AmountMinor)
-            throw new ArgumentOutOfRangeException(nameof(amount), "Capture must be more than zero and at most the authorized amount");
+        if (CaptureRefusal(amount) is { } refusal)
+            throw new ArgumentException($"Capture refused: {refusal}", nameof(amount));
 
         MoveTo(PaymentStatus.Captured);
         CapturedAmountMinor = amount.AmountMinor;

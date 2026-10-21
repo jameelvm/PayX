@@ -21,6 +21,7 @@ builder.Services.AddDbContext<PaymentsDbContext>(options => options
     .UseSnakeCaseNamingConvention());
 
 builder.Services.AddScoped<PaymentAuthorization>();
+builder.Services.AddScoped<PaymentCapture>();
 builder.Services.AddSingleton<IRiskCheck, AllowAllRiskCheck>();   // stand-in until Phase 5
 
 // Typed client for Vault. A plain timeout for now; retries and circuit
@@ -30,6 +31,15 @@ builder.Services.AddHttpClient<VaultClient>(http =>
     http.BaseAddress = new Uri(builder.Configuration["Vault:BaseUrl"]
         ?? throw new InvalidOperationException("Missing configuration: Vault:BaseUrl"));
     http.Timeout = builder.Configuration.GetValue("Vault:Timeout", TimeSpan.FromSeconds(15));
+});
+
+// Direct to the PSP for capture (and later void, refund): no card data
+// involved, so no Vault hop (decision 32).
+builder.Services.AddHttpClient<PspClient>(http =>
+{
+    http.BaseAddress = new Uri(builder.Configuration["Psp:BaseUrl"]
+        ?? throw new InvalidOperationException("Missing configuration: Psp:BaseUrl"));
+    http.Timeout = builder.Configuration.GetValue("Psp:Timeout", TimeSpan.FromSeconds(10));
 });
 
 var app = builder.Build();

@@ -118,6 +118,11 @@ TOK=$(curl -s -X POST localhost:7084/api/vault/cards -H "Content-Type: applicati
 curl -X POST localhost:7080/api/payments -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d "{\"merchantId\":\"<merchant-user-id>\",\"amount\":{\"amountMinor\":5000,\"currency\":\"USD\"},\"cardToken\":\"$TOK\"}"
 # 201 {"status":"Authorized", ...}; a decline is also 201 with status Declined
+
+# the merchant captures (log in as that Merchant → $MTOKEN); omit the body for the full amount
+curl -X POST localhost:7080/api/payments/<payment-id>/capture -H "Authorization: Bearer $MTOKEN" \
+  -H "Content-Type: application/json" -d '{"amountMinor":3000}'
+# 200 {"status":"Captured","capturedAmountMinor":3000, ...}
 ```
 
 Test cards (simulator): `4242424242424242` approves; `4000000000000002`

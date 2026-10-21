@@ -19,17 +19,38 @@ public sealed record AmountRequest(
     [Range(1, Money.MaxAmountMinor)] long AmountMinor,
     [Required, RegularExpression("^[A-Z]{3}$")] string Currency);
 
+// Doc ch.2: capturePayment(authorization_code, amount). The payment id stands
+// for the authorization; the amount is optional (default: all of it).
+public sealed record CapturePaymentRequest([Range(1, Money.MaxAmountMinor)] long? AmountMinor);
+
 public sealed record PaymentResponse(string Id, string Status, Guid MerchantId, Money Amount, string? AuthorizationCode,
-    string? DeclineCode)
+    string? DeclineCode, long? CapturedAmountMinor)
 {
     public static PaymentResponse From(Domain.Payment p) =>
-        new(p.Id, p.Status.ToString(), p.MerchantId, p.Amount, p.AuthorizationCode, p.DeclineCode);
+        new(p.Id, p.Status.ToString(), p.MerchantId, p.Amount, p.AuthorizationCode, p.DeclineCode, p.CapturedAmountMinor);
 }
 
 [ApiController]
 [Route("api/payments")]
-public sealed class PaymentsController(PaymentAuthorization authorization) : ControllerBase
+public sealed class PaymentsController(PaymentAuthorization authorization, PaymentCapture capture) : ControllerBase
 {
+    // The merchant takes the money, typically when the order ships. Only the
+    // payment's own merchant: the check is in PaymentCapture (404 otherwise).
+    [HttpPost("{id}/capture"), Authorize(Roles = "Merchant")]
+    public async Task<IActionResult> Capture(string id, CapturePaymentRequest? request, CancellationToken ct)
+    {
+        var merchantId = Guid.Parse(User.FindFirst("sub")!.Value);
+
+        var result = await capture.CaptureAsync(id, merchantId, request?.AmountMinor, ct);
+        return result switch
+        {
+            { Failure: null } => Ok(PaymentResponse.From(result.Payment!)),
+            { Payment: null } => Problem(statusCode: 404, title: result.Failure),
+            _ => Problem(statusCode: result.FailureStatus, title: result.Failure,
+                detail: $"payment {result.Payment.Id} is {result.Payment.Status}"),
+        };
+    }
+
     // The Gateway lets Customers and Merchants into /api/payments; inside,
     // Payment decides per endpoint (decision 21): only a customer pays.
     [HttpPost, Authorize(Roles = "Customer")]

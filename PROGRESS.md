@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 24 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 25 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -64,7 +64,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
-| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 4 / 9 | 🔄 |
+| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 5 / 9 | 🔄 |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
@@ -121,7 +121,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 4.2a | Vault holds the CVC until the first authorization | sensitive data: encrypted, TTL, read once |
 | ✅ | 4.2b | Vault authorizes at the PSP by token | the vault as the only path to card data |
 | ✅ | 4.2c | `authorizePayment` happy path (risk stand-in) | orchestration |
-| ⬜ | 4.3 | `capturePayment` | authorize vs capture |
+| ✅ | 4.3 | `capturePayment` | authorize vs capture |
 | ⬜ | 4.4 | `checkPaymentStatus` | status API |
 | ⬜ | 4.5 | Idempotency-Key table: insert or return stored response | never charge twice |
 | ⬜ | 4.6 | Concurrent duplicate requests (in-progress lock) | races on retries |
@@ -522,6 +522,27 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   turned Smart App Control off (RUNNING.md). Final run: build 0/0, 89
   tests green (15 + 56 + 18), `dotnet test` exit 0; Payment's `.exe`
   starts normally. Committed.
+- 4.3 `POST /api/payments/{id}/capture` {amountMinor?} (default: full
+  amount), Merchant role, only the payment's own merchant (else 404
+  `payment_not_found`). `PaymentCapture`: load → `Payment.CaptureRefusal`
+  (new; state → 409 `payment_not_capturable`, currency / amount → 422)
+  checked before any PSP call → `PspClient.CaptureAsync` (new typed client,
+  Payment → PSP directly, `Psp:BaseUrl`, 10 s) with key `{paymentId}:capture`
+  → `Capture` + save. PSP refusal → 409 with its code, timeout 504,
+  unreachable 502; payment stays Authorized. `PaymentResponse` gains
+  `capturedAmountMinor`. Decision 32, two failure-mode rows, doc-to-code
+  row, RUNNING.md example. Verified: 8 new tests (full capture by default,
+  URL quotes the PSP authorization id, key `{id}:capture`; partial; other
+  merchant → 404, PSP untouched; declined → 409, PSP untouched; over-capture
+  → 422, PSP untouched; PSP 504 / 409 → stays Authorized; slow PSP →
+  timeout, stays Authorized), 64/64 Payment tests. End to end through the
+  Gateway: full capture → Captured, PSP agrees (5,000); partial 3,000 → PSP
+  agrees; capture again → 409; other shop → 404; customer → 403;
+  over-capture → 422; declined → 409; **PSP down → 502, stays Authorized;
+  same capture after PSP restart → Captured, PSP shows one capture of
+  5,000** (the retry authorize can't do yet, 4.7). **Found by the tests:**
+  reading PSP refusals with one record for both shapes threw on every 409
+  (`status` is a number in ProblemDetails); now read separately. Committed.
 
 ## Environment notes
 
@@ -531,8 +552,8 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 4, Module 4.3 — `capturePayment`** (Authorized → Captured: Payment
-asks the PSP to capture by its authorization id; partial capture; no card
-data needed, so it need not go through Vault — decide that first).
+**Phase 4, Module 4.4 — `checkPaymentStatus`** (`GET /api/payments/{id}`:
+the customer or the merchant of a payment asks where it is; nobody else
+can see it).
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.
