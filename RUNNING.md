@@ -26,7 +26,7 @@ docker compose ps        # postgres, redis, localstack, kafka healthy; kafka-ini
 | Container | Host port | What it is |
 |---|---|---|
 | `payx-postgres` | 5434 | Six databases, one login role each (admin: `payx_admin` / `payx_admin`) |
-| `payx-redis` | 6381 | Risk velocity counters (later) |
+| `payx-redis` | 6381 | Vault: CVCs until first authorization (`vault:cvc:*`); Risk velocity counters (Phase 5) |
 | `payx-localstack` | 4568 | S3, DynamoDB, KMS |
 | `payx-kafka` | 9094 | Kafka broker (containers use `kafka:9092`) |
 | `payx-kafka-ui` | 7090 | http://localhost:7090 |
@@ -79,7 +79,7 @@ Ops accounts can't self-register; create one in psql as an admin would
 # terminal 5: PSP simulator (applies its migrations on start; Postgres)
 dotnet run --project src/services/PayX.PspSimulator --launch-profile "PspSimulator (local)"
 
-# terminal 6: Vault (KMS + DynamoDB in LocalStack, so start localstack first)
+# terminal 6: Vault (KMS + DynamoDB in LocalStack, CVCs in Redis: start both first)
 dotnet run --project src/services/PayX.Vault --launch-profile "Vault (local)"
 ```
 
@@ -97,8 +97,9 @@ curl -m 3 -X POST localhost:7088/api/psp/authorizations -H "X-Psp-Fault: timeout
 
 # tokenize a card; nothing but the token, brand, last4 and expiry ever comes back
 curl -X POST localhost:7084/api/vault/cards -H "Content-Type: application/json" \
-  -d '{"number":"4242 4242 4242 4242","expMonth":12,"expYear":2030}'
-curl localhost:7084/health/ready     # kms:card-vault + dynamodb:card-vault
+  -d '{"number":"4242 4242 4242 4242","expMonth":12,"expYear":2030,"cvc":"123"}'
+curl localhost:7084/health/ready     # redis + kms:card-vault + dynamodb:card-vault
+docker exec payx-redis redis-cli TTL vault:cvc:<token>   # CVC held, encrypted, ~600 s
 ```
 
 Test cards (simulator): `4242424242424242` approves; `4000000000000002`
@@ -116,8 +117,9 @@ empty `payx-card-vault` table, so every token from before the restart is gone.
 dotnet test PayX.slnx
 ```
 
-`PayX.Vault.Tests` are integration tests against LocalStack's KMS, so
-`docker compose up -d localstack` first (Module 3.6). They fail, rather
+`PayX.Vault.Tests` are integration tests against LocalStack's KMS and
+DynamoDB and Redis, so `docker compose up -d localstack redis` first
+(Modules 3.6, 4.2a). They fail, rather
 than skip, when it is down: a crypto test that silently skips is worse
 than one that fails.
 `PayX.Payment.Tests` include two integration tests against `payx_payments`,

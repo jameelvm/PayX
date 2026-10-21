@@ -8,13 +8,21 @@ namespace PayX.Vault.Services;
 /// on every other service handles only the token (CLAUDE.md: "raw PANs never
 /// leave Vault"). That keeps PCI DSS scope to this one service.
 /// </summary>
-public sealed class CardVault(CardEncryptor encryptor, CardRepository cards, TimeProvider clock)
+public sealed class CardVault(CardEncryptor encryptor, CardRepository cards, CvcStore cvcs, TimeProvider clock)
 {
-    public async Task<VaultedCard> TokenizeAsync(string number, int expMonth, int expYear, CancellationToken ct)
+    public async Task<VaultedCard> TokenizeAsync(string number, int expMonth, int expYear, string? cvc,
+        CancellationToken ct)
     {
         // The token exists before the ciphertext does, because the ciphertext
         // is bound to it (3.6: encryption context + GCM associated data).
         var token = VaultedCard.NewToken();
+
+        // CVC first: if storing the card then fails, the CVC is an orphan
+        // that expires on its own. The other order would leave a stored card
+        // nobody can authorize.
+        if (cvc is not null)
+            await cvcs.HoldAsync(token, cvc, ct);
+
         var encrypted = await encryptor.EncryptAsync(number, token, ct);
 
         var card = new VaultedCard(token, encrypted, CardNumber.BrandOf(number), number[^4..],
@@ -36,4 +44,10 @@ public sealed class CardVault(CardEncryptor encryptor, CardRepository cards, Tim
         await cards.FindAsync(token, ct) is { } card
             ? await encryptor.DecryptAsync(card.Encrypted, card.Token, ct)
             : null;
+
+    /// <summary>
+    /// The CVC given at tokenization, once: for the first authorization
+    /// (4.2b). Null if it was never given, already used, or expired.
+    /// </summary>
+    public Task<string?> TakeCvcAsync(string token, CancellationToken ct) => cvcs.TakeAsync(token, ct);
 }

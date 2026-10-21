@@ -6,15 +6,16 @@ using PayX.Vault.Services;
 
 namespace PayX.Vault.Api;
 
-// No CVC field, and unknown fields are refused rather than ignored: a client
-// sending "cvc" gets a 400 instead of believing it was kept. PCI DSS forbids
-// storing the CVC after authorization, even encrypted; it travels with the
-// authorization itself (Phase 4), never into storage.
+// The CVC is accepted here but never stored with the card: it is held
+// encrypted in Redis until the first authorization uses it, or its TTL ends
+// (4.2a, CvcStore). Unknown fields are still refused rather than ignored, so
+// a misspelt field fails loudly instead of being silently dropped.
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record TokenizeRequest(
     [Required] string Number,
     [Range(1, 12)] int ExpMonth,
-    [Range(2000, 2100)] int ExpYear);
+    [Range(2000, 2100)] int ExpYear,
+    [RegularExpression("^[0-9]{3,4}$")] string? Cvc);
 
 // What every other service gets instead of a card number.
 public sealed record CardResponse(string Token, string Brand, string Last4, int ExpMonth, int ExpYear)
@@ -34,7 +35,7 @@ public sealed class CardsController(CardVault vault) : ControllerBase
         if (!CardNumber.IsValid(number))
             return Problem(statusCode: 400, title: "invalid_number");
 
-        var card = await vault.TokenizeAsync(number, request.ExpMonth, request.ExpYear, ct);
+        var card = await vault.TokenizeAsync(number, request.ExpMonth, request.ExpYear, request.Cvc, ct);
         return CreatedAtAction(nameof(Get), new { token = card.Token }, CardResponse.From(card));
     }
 

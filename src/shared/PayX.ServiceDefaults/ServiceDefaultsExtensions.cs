@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using PayX.ServiceDefaults.Health;
+using StackExchange.Redis;
 
 namespace PayX.ServiceDefaults;
 
@@ -54,6 +55,30 @@ public static class ServiceDefaultsExtensions
             tags: [HealthEndpoints.ReadyTag],
             // A probe that hangs is worse than one that fails: the load
             // balancer is waiting on it. Give up after 2 seconds.
+            timeout: TimeSpan.FromSeconds(2)));
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers a Redis connection from <c>ConnectionStrings:Redis</c>, with
+    /// a readiness check. Each service keeps to its own key prefix
+    /// (<c>vault:*</c>, <c>risk:*</c>) on the shared local instance.
+    /// </summary>
+    public static WebApplicationBuilder AddRedis(this WebApplicationBuilder builder)
+    {
+        var connectionString = builder.Configuration.GetConnectionString("Redis")
+            ?? throw new InvalidOperationException("Missing configuration: ConnectionStrings:Redis");
+
+        // One multiplexer per process: it is thread-safe and pipelines every
+        // command over one connection. One per request would exhaust sockets.
+        builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(connectionString));
+
+        builder.Services.AddHealthChecks().Add(new HealthCheckRegistration(
+            name: "redis",
+            factory: sp => new RedisHealthCheck(sp.GetRequiredService<IConnectionMultiplexer>()),
+            failureStatus: HealthStatus.Unhealthy,
+            tags: [HealthEndpoints.ReadyTag],
             timeout: TimeSpan.FromSeconds(2)));
 
         return builder;

@@ -52,7 +52,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 21 / 68 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 21 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -62,7 +62,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
-| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 1 / 7 | 🔄 |
+| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 1 / 9 | 🔄 |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
@@ -116,7 +116,9 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | | Module | What it builds | Concept |
 |---|---|---|---|
 | ✅ | 4.1 | `payments` table + state machine with legal transitions | explicit state machine |
-| ⬜ | 4.2 | `authorizePayment` happy path | orchestration |
+| 🔍 | 4.2a | Vault holds the CVC until the first authorization | sensitive data: encrypted, TTL, read once |
+| ⬜ | 4.2b | Vault authorizes at the PSP by token | the vault as the only path to card data |
+| ⬜ | 4.2c | `authorizePayment` happy path (risk stand-in) | orchestration |
 | ⬜ | 4.3 | `capturePayment` | authorize vs capture |
 | ⬜ | 4.4 | `checkPaymentStatus` | status API |
 | ⬜ | 4.5 | Idempotency-Key table: insert or return stored response | never charge twice |
@@ -445,6 +447,27 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   constraint. **Found:** constraints check rows, not moves: a raw `UPDATE`
   Created → Voided with a made-up PSP reference passes (recorded as the
   known gap in decision 28). Committed.
+- Owner, 2026-10-21: CVC option (b), Vault holds it; risk stand-in OK.
+  4.2 split into three modules (one concept each): 4.2a CVC hold, 4.2b
+  Vault → PSP authorize by token, 4.2c Payment orchestration. Lettered so
+  later module numbers don't change.
+- 4.2a `CvcStore` (Vault): CVC accepted at tokenization (3–4 digits),
+  envelope-encrypted with record id `{token}:cvc`, `SET vault:cvc:{token}`
+  with TTL `Vault:CvcTtl` (10 min), taken once with `GETDEL`; held before
+  the card is stored. `CardVault.TakeCvcAsync` (no HTTP endpoint).
+  `AddRedis()` + `RedisHealthCheck` in ServiceDefaults (one multiplexer,
+  `abortConnect=false`, readiness `redis`). CLAUDE.md: Vault owns
+  `vault:cvc:*`. Decision 29 (decision 27 and README 3.7 annotated),
+  failure-mode row, §4 question closed. Tests moved onto a shared
+  `TestVault` helper. Verified: 14/14 Vault tests (5 new: taken once then
+  null; Redis value is only the envelope — 3 fields, ciphertext 12+3+16
+  bytes — with TTL 9–10 min; 1 s TTL expires; no CVC → none held; 10
+  simultaneous takes → exactly one gets it; the "stored item has no CVC"
+  test now tokenizes *with* one). HTTP: 201; `TTL` 599 s in redis-cli;
+  3-digit-only rule (`12` → 400); misspelt `cvv` → 400; ready lists
+  redis + kms + dynamodb; Redis stopped → ready 503, live 200, tokenize
+  with CVC 500; back to 200 after restart; CVC and card number 0 times in
+  the log. Awaiting owner review, then commit.
 
 ## Environment notes
 
@@ -454,8 +477,8 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 4, Module 4.2 — `authorizePayment` happy path** (Payment → Vault
-→ PSP; decide the CVC path first, see DESIGN §4; Risk doesn't exist until
-Phase 5, so 4.2 needs an explicit stand-in for the risk step).
+**Phase 4, Module 4.2b — Vault authorizes at the PSP by token**
+(detokenize + take the CVC + call the PSP simulator, forwarding an
+idempotency key; Payment will call this in 4.2c).
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.

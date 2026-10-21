@@ -474,7 +474,9 @@ nothing and can't be recomputed. The only consumer of the real number will
 be Vault's own call to the PSP (Phase 4: Payment → Vault → PSP). The
 request DTO has no CVC field and refuses unknown fields, so a client
 sending `cvc` gets a 400 instead of believing it was kept: PCI DSS forbids
-storing it, even encrypted.
+storing it, even encrypted. *(Changed in 4.2a: the CVC is now accepted and
+held encrypted in Redis until the first authorization, never stored with
+the card.)*
 
 **Verify:** tokenize → 201 + `Location`; lookup → brand/last4 only; `cvc`
 in the body → 400; bad Luhn → 400 `invalid_number` (number not echoed);
