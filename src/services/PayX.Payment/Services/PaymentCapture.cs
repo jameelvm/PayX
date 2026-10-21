@@ -12,7 +12,7 @@ public sealed record CaptureResult(Domain.Payment? Payment, int FailureStatus = 
 /// flow: the merchant (typically on shipping) turns the hold into a charge.
 /// Partial capture is allowed; the rest of the hold is released by the PSP.
 /// </summary>
-public sealed class PaymentCapture(PaymentsDbContext db, PspClient psp)
+public sealed class PaymentCapture(PaymentsDbContext db, PspClient psp, CurrentIdempotencyKey key)
 {
     public async Task<CaptureResult> CaptureAsync(string paymentId, Guid merchantId, long? amountMinor, CancellationToken ct)
     {
@@ -24,6 +24,12 @@ public sealed class PaymentCapture(PaymentsDbContext db, PspClient psp)
 
         // No amount = capture everything that was authorized.
         var amount = new Money(amountMinor ?? payment.Amount.AmountMinor, payment.Amount.Currency);
+
+        // A resumed key (4.6) whose earlier attempt saved Captured but died
+        // before storing its answer: that capture is this request's outcome,
+        // not a conflict. (A *new* key on a captured payment is still 409.)
+        if (key.Resumed && payment.Status == Domain.PaymentStatus.Captured && payment.CapturedAmountMinor == amount.AmountMinor)
+            return new CaptureResult(payment);
 
         // 1. Refuse here what we couldn't record afterwards: the PSP is never
         //    asked to capture a payment we'd then fail to mark Captured.

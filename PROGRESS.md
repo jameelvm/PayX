@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 27 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 28 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -64,7 +64,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
-| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 7 / 9 | 🔄 |
+| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 8 / 9 | 🔄 |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
@@ -124,7 +124,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 4.3 | `capturePayment` | authorize vs capture |
 | ✅ | 4.4 | `checkPaymentStatus` | status API |
 | ✅ | 4.5 | Idempotency-Key table: insert or return stored response | never charge twice |
-| ⬜ | 4.6 | Concurrent duplicate requests (in-progress lock) | races on retries |
+| ✅ | 4.6 | Concurrent duplicate requests (in-progress lock) | races on retries |
 | ⬜ | 4.7 | Propagating idempotency keys to the PSP (incl. the 4.2b gap: a same-key retry through Vault must replay, not 409) | end-to-end idempotency |
 
 ### Phase 5: Risk
@@ -574,6 +574,26 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   another customer with the same key string → its own payment. **Known
   limit (4.6):** a key whose request died or ended 5xx stays in progress,
   so its retries get 409 forever. Committed.
+- 4.6 `idempotency_keys` gains `locked_until` and `payment_id` (migration
+  `IdempotencyLockAndRecoveryPoint`). Claim locks for 30 s
+  (`Payment:IdempotencyLock`); the filter releases the lock on a 5xx; a
+  crashed request's lock lapses. `ClaimAsync` → new outcome `Resumed`: an
+  unfinished key with a lapsed or released lock is taken over by one
+  conditional `ExecuteUpdate` (one winner). `CurrentIdempotencyKey`
+  (scoped) carries the claimed key to the services. `PaymentAuthorization`
+  attaches its new payment to the key in the same `SaveChanges` (recovery
+  point) and is now resumable: each step runs only from its starting state.
+  Capture resumed after a crash that had saved Captured returns success.
+  Decision 33, two failure-mode rows, doc-to-code row. Verified: 6 new
+  tests (lapsed lock taken over, recovery point kept; released key taken
+  over at once; 10 simultaneous retries → exactly one taker; payment
+  attached to its key in the same save; retry resumes the same payment at
+  the Vault step with the same PSP key, one payment; outcome already
+  reached → Vault not called), 78/78. End to end: PSP down → 502, key row
+  has its recovery point and is released; PSP back, same key → **the same
+  payment** resumed (1 row), which then hits the 4.2b gap: Vault already
+  used the CVC → 422 `cvc_unavailable` (stored as that key's answer, since
+  it is a 4xx). Fixed in 4.7. Committed.
 
 ## Environment notes
 
@@ -583,6 +603,6 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 4, Module 4.6 — crashed and unfinished attempts** (in-progress lock
-with expiry; a retry takes over a stale key and resumes the *same* payment
-instead of creating a second one).
+**Phase 4, Module 4.7 — keys end to end** (close the 4.2b gap: Vault keeps
+the CVC until the PSP gives a definitive answer and remembers that answer
+per key, so a retry through Vault replays instead of `cvc_unavailable`).

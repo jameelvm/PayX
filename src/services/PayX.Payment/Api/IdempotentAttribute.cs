@@ -15,7 +15,8 @@ namespace PayX.Payment.Api;
 /// </summary>
 public sealed class IdempotentAttribute() : TypeFilterAttribute(typeof(IdempotencyFilter));
 
-public sealed class IdempotencyFilter(IdempotencyService idempotency, IOptions<JsonOptions> json) : IAsyncActionFilter
+public sealed class IdempotencyFilter(IdempotencyService idempotency, CurrentIdempotencyKey current,
+    IOptions<JsonOptions> json) : IAsyncActionFilter
 {
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
@@ -40,7 +41,7 @@ public sealed class IdempotencyFilter(IdempotencyService idempotency, IOptions<J
                 context.Result = Problem(422, "idempotency_key_reused_with_different_request");
                 return;
             case ClaimOutcome.InProgress:
-                // The first request is still running (or died: 4.6). Not
+                // Another request with this key is running right now. Not
                 // processed again; the caller retries in a moment.
                 http.Response.Headers.RetryAfter = "1";
                 context.Result = Problem(409, "request_in_progress");
@@ -50,19 +51,29 @@ public sealed class IdempotencyFilter(IdempotencyService idempotency, IOptions<J
                 return;
         }
 
+        // Claimed or Resumed: the services behind the endpoint see the key
+        // (authorize attaches its payment to it, or resumes the one attached).
+        current.Record = claim.Record;
+        current.Resumed = claim.Outcome == ClaimOutcome.Resumed;
+
         var executed = await next();
         if (executed.Exception is not null && !executed.ExceptionHandled)
-            return;   // key stays in progress (see 4.6)
+            return;   // lock left to expire: the next retry after it takes over
 
         // Store definitive answers only: success, decline, 4xx refusals.
         // A 5xx means "no outcome yet" (Vault or the PSP failed or timed out),
         // and replaying it forever would stop the caller ever finding out
-        // what happened: the 3.5 lesson. Those keys stay in progress (4.6).
+        // what happened: the 3.5 lesson. Those keys are released instead, so
+        // the very next retry takes over and resumes the same payment.
         if (executed.Result is ObjectResult { StatusCode: < 500 } result)
         {
             var location = (result as CreatedResult)?.Location;
             await idempotency.CompleteAsync(claim.Record!, result.StatusCode ?? 200,
                 JsonSerializer.Serialize(result.Value, json.Value.JsonSerializerOptions), location, http.RequestAborted);
+        }
+        else
+        {
+            await idempotency.ReleaseAsync(claim.Record!, http.RequestAborted);
         }
     }
 

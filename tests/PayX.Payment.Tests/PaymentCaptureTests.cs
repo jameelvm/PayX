@@ -114,7 +114,7 @@ public sealed class PaymentCaptureTests
             BaseAddress = new Uri("http://psp.test/"),
             Timeout = timeout ?? TimeSpan.FromSeconds(10),
         });
-        return new PaymentCapture(NewContext(), client).CaptureAsync(id, merchant, amountMinor, default);
+        return new PaymentCapture(NewContext(), client, new CurrentIdempotencyKey()).CaptureAsync(id, merchant, amountMinor, default);
     }
 
     private static async Task<Domain.Payment> SavedPayment(bool authorized)

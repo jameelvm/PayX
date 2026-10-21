@@ -86,7 +86,7 @@ public sealed class PaymentAuthorizationTests
     private Task<AuthorizationResult> Authorize(IRiskCheck? risk = null)
     {
         var client = new VaultClient(new HttpClient(_vault) { BaseAddress = new Uri("http://vault.test/") });
-        return new PaymentAuthorization(NewContext(), risk ?? new AllowAllRiskCheck(), client)
+        return new PaymentAuthorization(NewContext(), risk ?? new AllowAllRiskCheck(), client, new CurrentIdempotencyKey())
             .AuthorizeAsync(Customer, Merchant, Amount, "tok_test", default);
     }
 

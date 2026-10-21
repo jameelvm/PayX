@@ -23,6 +23,7 @@ public sealed class PaymentsDbContext(DbContextOptions<PaymentsDbContext> option
             // text, not jsonb: a replay must be byte-for-byte the first answer (3.4).
             record.Property(r => r.ResponseBody).HasColumnType("text");
             record.Property(r => r.ResponseLocation).HasMaxLength(200);
+            record.Property(r => r.PaymentId).HasMaxLength(40);
         });
 
         modelBuilder.Entity<Domain.Payment>(payment =>
