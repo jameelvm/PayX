@@ -46,7 +46,7 @@ public sealed class PaymentsController(PaymentAuthorization authorization, Payme
 
     // The merchant takes the money, typically when the order ships. Only the
     // payment's own merchant: the check is in PaymentCapture (404 otherwise).
-    [HttpPost("{id}/capture"), Authorize(Roles = "Merchant")]
+    [HttpPost("{id}/capture"), Authorize(Roles = "Merchant"), Idempotent]
     public async Task<IActionResult> Capture(string id, CapturePaymentRequest? request, CancellationToken ct)
     {
         var merchantId = Guid.Parse(User.FindFirst("sub")!.Value);
@@ -63,7 +63,7 @@ public sealed class PaymentsController(PaymentAuthorization authorization, Payme
 
     // The Gateway lets Customers and Merchants into /api/payments; inside,
     // Payment decides per endpoint (decision 21): only a customer pays.
-    [HttpPost, Authorize(Roles = "Customer")]
+    [HttpPost, Authorize(Roles = "Customer"), Idempotent]
     public async Task<IActionResult> Authorize(AuthorizePaymentRequest request, CancellationToken ct)
     {
         var customerId = Guid.Parse(User.FindFirst("sub")!.Value);

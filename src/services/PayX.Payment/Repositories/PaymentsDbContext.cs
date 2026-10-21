@@ -7,9 +7,24 @@ namespace PayX.Payment.Repositories;
 public sealed class PaymentsDbContext(DbContextOptions<PaymentsDbContext> options) : DbContext(options)
 {
     public DbSet<Domain.Payment> Payments => Set<Domain.Payment>();
+    public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<IdempotencyRecord>(record =>
+        {
+            record.ToTable("idempotency_keys");
+            // The primary key is the de-duplication: two requests can't both
+            // insert the same (caller, key), however close together they arrive.
+            record.HasKey(r => new { r.Scope, r.Key });
+            record.Property(r => r.Scope).HasMaxLength(64);
+            record.Property(r => r.Key).HasMaxLength(255);
+            record.Property(r => r.RequestHash).HasMaxLength(64);
+            // text, not jsonb: a replay must be byte-for-byte the first answer (3.4).
+            record.Property(r => r.ResponseBody).HasColumnType("text");
+            record.Property(r => r.ResponseLocation).HasMaxLength(200);
+        });
+
         modelBuilder.Entity<Domain.Payment>(payment =>
         {
             payment.ToTable("payments", t =>

@@ -116,11 +116,14 @@ All five running (Identity, Gateway, Payment, Vault, PSP simulator).
 TOK=$(curl -s -X POST localhost:7084/api/vault/cards -H "Content-Type: application/json" \
   -d '{"number":"4242424242424242","expMonth":12,"expYear":2030,"cvc":"123"}' | python -c "import sys,json;print(json.load(sys.stdin)['token'])")
 curl -X POST localhost:7080/api/payments -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: checkout-1" \
   -d "{\"merchantId\":\"<merchant-user-id>\",\"amount\":{\"amountMinor\":5000,\"currency\":\"USD\"},\"cardToken\":\"$TOK\"}"
 # 201 {"status":"Authorized", ...}; a decline is also 201 with status Declined
+# the same request again with the same key → the same 201, header Idempotent-Replayed: true
 
 # the merchant captures (log in as that Merchant → $MTOKEN); omit the body for the full amount
 curl -X POST localhost:7080/api/payments/<payment-id>/capture -H "Authorization: Bearer $MTOKEN" \
+  -H "Idempotency-Key: capture-1" \
   -H "Content-Type: application/json" -d '{"amountMinor":3000}'
 # 200 {"status":"Captured","capturedAmountMinor":3000, ...}
 ```

@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 26 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 27 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -64,7 +64,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
-| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 6 / 9 | 🔄 |
+| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 7 / 9 | 🔄 |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
@@ -123,7 +123,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 4.2c | `authorizePayment` happy path (risk stand-in) | orchestration |
 | ✅ | 4.3 | `capturePayment` | authorize vs capture |
 | ✅ | 4.4 | `checkPaymentStatus` | status API |
-| ⬜ | 4.5 | Idempotency-Key table: insert or return stored response | never charge twice |
+| ✅ | 4.5 | Idempotency-Key table: insert or return stored response | never charge twice |
 | ⬜ | 4.6 | Concurrent duplicate requests (in-progress lock) | races on retries |
 | ⬜ | 4.7 | Propagating idempotency keys to the PSP (incl. the 4.2b gap: a same-key retry through Vault must replay, not 409) | end-to-end idempotency |
 
@@ -554,6 +554,26 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   instance (`http://localhost:7082/…`) through the Gateway (YARP doesn't
   forward the original host); now relative (`/api/payments/{id}`). Two
   failure-mode rows, doc-to-code row. Committed.
+- 4.5 `[Idempotent]` on `POST /api/payments` and `…/{id}/capture`
+  (`Idempotency-Key` required, else 400 `idempotency_key_required`).
+  `idempotency_keys` (migration `IdempotencyKeys`): PK (scope = caller
+  `sub`, key), SHA-256 request hash, stored status / body / Location,
+  completed_at. `IdempotencyService.ClaimAsync`: INSERT committed on its own
+  before the work (no transaction across Vault/PSP calls) → on unique
+  violation: different hash → 422, completed → replay (+ `Idempotent-Replayed`,
+  original `Location`), otherwise → 409 `request_in_progress` +
+  `Retry-After: 1`. Definitive answers stored (2xx, 4xx); 5xx and
+  exceptions leave the key in progress (handled in 4.6). Decision 6
+  accepted, double-click row verified, doc-to-code row, RUNNING.md examples
+  send the header. Verified: 6 new tests (claim; in progress; replay with
+  stored status/body/Location; mismatch; keys per caller; 10 simultaneous
+  claims → exactly 1 winner, 9 in progress), 72/72. End to end: repeat
+  → same payment id, `Idempotent-Replayed`, one row; different amount →
+  422; no key → 400; two requests at the same moment → 201 + 409, one
+  payment; capture twice with one key → 200 + 200 (was 409), new key → 409;
+  another customer with the same key string → its own payment. **Known
+  limit (4.6):** a key whose request died or ended 5xx stays in progress,
+  so its retries get 409 forever. Committed.
 
 ## Environment notes
 
@@ -563,5 +583,6 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 4, Module 4.5 — Payment's own Idempotency-Key** (a double-clicked
-Pay replays the first answer instead of paying twice).
+**Phase 4, Module 4.6 — crashed and unfinished attempts** (in-progress lock
+with expiry; a retry takes over a stale key and resumes the *same* payment
+instead of creating a second one).
