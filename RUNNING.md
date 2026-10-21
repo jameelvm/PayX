@@ -120,6 +120,8 @@ dotnet test PayX.slnx
 `docker compose up -d localstack` first (Module 3.6). They fail, rather
 than skip, when it is down: a crypto test that silently skips is worse
 than one that fails.
+`PayX.Payment.Tests` include two integration tests against `payx_payments`,
+so Postgres must be up too (Module 4.1).
 
 ## Windows / Git Bash notes
 

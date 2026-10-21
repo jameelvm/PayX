@@ -11,4 +11,17 @@
     <ProjectReference Include="..\..\shared\PayX.ServiceDefaults\PayX.ServiceDefaults.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="EFCore.NamingConventions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <!-- Pins EF Core to the Design package's version. Without it Npgsql pulls
+         EF 10.0.4 while Design (private to this project) compiles against
+         10.0.12, and PayX.Payment.Tests can't load the mismatched assembly. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.12" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+  </ItemGroup>
+
 </Project>

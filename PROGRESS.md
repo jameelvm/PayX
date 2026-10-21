@@ -52,17 +52,17 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 19 / 68 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 21 / 68 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
 | Phase | Name | Doc concept | Done | Status |
 |---|---|---|---|---|
-| 0 | [Design](#phase-0-design) | requirements, estimates (+ corrections), HLD | 1 / 2 | 🔄 |
+| 0 | [Design](#phase-0-design) | requirements, estimates (+ corrections), HLD | 2 / 2 | ✅ |
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
-| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 0 / 7 | ⬜ |
+| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 1 / 7 | 🔄 |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
@@ -76,7 +76,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | | Module | What it builds | Concept |
 |---|---|---|---|
 | ✅ | 0.1 | Design draft: CLAUDE / DESIGN / PROGRESS / ARCHITECTURE diagrams | — |
-| ⬜ | 0.2 | Owner confirms open decisions (DESIGN §1: 3, 4, 10, 11, 13, 14) | — |
+| ✅ | 0.2 | Owner confirms open decisions (DESIGN §1: 3, 4, 10, 11, 13, 14): 3, 13, 14 accepted 2026-10-20; 4, 10, 11 confirmed at the start of Phases 6, 7, 5 | — |
 
 ### Phase 1: Local substrate
 
@@ -115,7 +115,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 
 | | Module | What it builds | Concept |
 |---|---|---|---|
-| ⬜ | 4.1 | `payments` table + state machine with legal transitions | explicit state machine |
+| ✅ | 4.1 | `payments` table + state machine with legal transitions | explicit state machine |
 | ⬜ | 4.2 | `authorizePayment` happy path | orchestration |
 | ⬜ | 4.3 | `capturePayment` | authorize vs capture |
 | ⬜ | 4.4 | `checkPaymentStatus` | status API |
@@ -421,6 +421,31 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   RUNNING.md). Phase 3 wrap-up: README Phase 3 section, RUNNING.md (PSP +
   Vault), DESIGN §3 Q&A (5) and §5 rows. Committed.
 
+**Phase 4 — Payment core. In progress.** Decisions 3 (orchestrated saga),
+13 (Vault) and 14 (PSP simulator) accepted by the owner on 2026-10-20; 4,
+10 and 11 are confirmed at the start of Phases 6, 7 and 5.
+- 4.1 `payments` table (migration `InitialPayments`) and the state machine.
+  `PaymentStatus`: Created, RiskApproved, RiskBlocked, Authorized,
+  Declined, Captured, Voided (Challenged, Unknown, Settled, Refunded,
+  Disputed arrive with their modules). `PaymentStateMachine`: one table of
+  legal moves; anything unlisted is final; `IllegalTransitionException`
+  otherwise. `Payment`: no public setters, one method per move (capture
+  checks currency and 0 < amount ≤ authorized), `Money` as an EF complex
+  type (two columns), `xmin` concurrency. Check constraints: status list
+  (generated from the enum), amount > 0, PSP reference once Authorized /
+  Captured / Voided, captured amount iff Captured and ≤ amount. EF pinned
+  to 10.0.12 (Npgsql pulled 10.0.4; the test project couldn't load the
+  mismatch). New test project `PayX.Payment.Tests`. Decision 28, two
+  failure-mode rows. Verified: 48 transition tests (every from → to pair
+  vs a separately written spec; refused moves change nothing), final
+  states, nothing returns to Created, partial capture, over-capture and
+  wrong currency refused; 2 Postgres tests (Money round trip; capture vs
+  void from two contexts → second save `DbUpdateConcurrencyException`,
+  row stays Captured). In psql each bad row refused by its named
+  constraint. **Found:** constraints check rows, not moves: a raw `UPDATE`
+  Created → Voided with a made-up PSP reference passes (recorded as the
+  known gap in decision 28). Committed.
+
 ## Environment notes
 
 - **Git Bash rewrites container paths.** `docker exec payx-kafka /opt/kafka/bin/…`
@@ -429,8 +454,8 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 4, Module 4.1 — `payments` table + state machine with legal
-transitions** (PayX's own payment service; first decide the CVC path, see
-DESIGN §4).
+**Phase 4, Module 4.2 — `authorizePayment` happy path** (Payment → Vault
+→ PSP; decide the CVC path first, see DESIGN §4; Risk doesn't exist until
+Phase 5, so 4.2 needs an explicit stand-in for the risk step).
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.

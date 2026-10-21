@@ -13,6 +13,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/PayX.Contracts.Tests/PayX.Contracts.Tests.csproj" />
+    <Project Path="tests/PayX.Payment.Tests/PayX.Payment.Tests.csproj" />
     <Project Path="tests/PayX.Vault.Tests/PayX.Vault.Tests.csproj" />
   </Folder>
 </Solution>
