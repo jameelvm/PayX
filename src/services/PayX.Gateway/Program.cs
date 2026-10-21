@@ -1,6 +1,4 @@
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.IdentityModel.Tokens;
 using PayX.ServiceDefaults;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -9,36 +7,8 @@ builder.AddPayXDefaults();
 
 // Every request's "Authorization: Bearer <jwt>" is checked here, at the edge,
 // before YARP forwards anything. A bad token never reaches a service.
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        var jwt = builder.Configuration.GetSection("Jwt");
-
-        // Identity's discovery document → jwks_uri → public key, fetched and
-        // cached by the middleware; refetched when a token shows an unknown
-        // kid. The Gateway never holds a key file of its own.
-        options.MetadataAddress = jwt["MetadataAddress"]!;
-        options.RequireHttpsMetadata = false;   // local only: plain http to Identity
-
-        // Keep claim names as issued ("sub", "role"), instead of .NET's habit
-        // of renaming them to long schema URLs.
-        options.MapInboundClaims = false;
-
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidIssuer = jwt["Issuer"],          // iss must be payx-identity
-            ValidAudience = jwt["Audience"],      // aud must be payx-api
-            // Only the algorithm Identity actually uses. Without this, a
-            // forged token could claim "alg": "none" (no signature at all) or
-            // switch algorithms to trick the verifier.
-            ValidAlgorithms = [SecurityAlgorithms.EcdsaSha256],
-            // exp is checked by default; allow 30 s for clocks that disagree
-            // (the library default is 5 minutes, a third of our token's life).
-            ClockSkew = TimeSpan.FromSeconds(30),
-            NameClaimType = "unique_name",
-            RoleClaimType = "role",
-        };
-    });
+// (Validation rules live in ServiceDefaults since 4.2c, shared with Payment.)
+builder.AddPayXJwtAuthentication();
 
 builder.Services.AddAuthorization(options =>
 {

@@ -28,7 +28,9 @@ tracker*, *Current state* and
    the owner approves and it is committed.
 6. **Immediately before every commit:** `dotnet build PayX.slnx
    --no-incremental` (0 warnings, 0 errors) and `dotnet test PayX.slnx`,
-   (needs LocalStack up: Vault's tests call its KMS),
+   (needs LocalStack up: Vault's tests call its KMS), and **check its exit
+   code**, not just the summary lines: a test DLL that fails to load prints
+   no "Failed!" line (seen in 4.2c, Smart App Control),
    then `git diff --cached --stat` to check that only expected files are
    staged. Added after commit `bd1a26f` shipped a broken build: an editor
    save removed Identity's JWT package reference 26 s before the commit, and
@@ -52,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 23 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 24 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -62,7 +64,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
-| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 3 / 9 | 🔄 |
+| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 4 / 9 | 🔄 |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
@@ -118,7 +120,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 4.1 | `payments` table + state machine with legal transitions | explicit state machine |
 | ✅ | 4.2a | Vault holds the CVC until the first authorization | sensitive data: encrypted, TTL, read once |
 | ✅ | 4.2b | Vault authorizes at the PSP by token | the vault as the only path to card data |
-| ⬜ | 4.2c | `authorizePayment` happy path (risk stand-in) | orchestration |
+| ✅ | 4.2c | `authorizePayment` happy path (risk stand-in) | orchestration |
 | ⬜ | 4.3 | `capturePayment` | authorize vs capture |
 | ⬜ | 4.4 | `checkPaymentStatus` | status API |
 | ⬜ | 4.5 | Idempotency-Key table: insert or return stored response | never charge twice |
@@ -488,6 +490,38 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   not the PSP's replay; and with the PSP down the CVC was already used up,
   so even a "nothing happened" failure can't be retried. Recorded for 4.7.
   Committed.
+- 4.2c `POST /api/payments` {merchantId, amount {amountMinor, currency},
+  cardToken}, Customer role only, customer = token `sub`.
+  `PaymentAuthorization`: save Created → `IRiskCheck` (stand-in
+  `AllowAllRiskCheck`) → save RiskApproved / RiskBlocked → `VaultClient`
+  POST `/api/vault/cards/{token}/authorizations` with key
+  `{paymentId}:authorize` → save Authorized (PSP id + auth code) /
+  Declined (code). 201 for every business outcome; otherwise the payment
+  stays RiskApproved and the caller gets 422 (Vault 4xx) or the 5xx, with
+  the payment id in `detail`. Token validation moved from the Gateway to
+  ServiceDefaults `AddPayXJwtAuthentication()` unchanged (JwtBearer package
+  moved too); Payment uses it with a deny-by-default fallback policy.
+  `Vault:Timeout` 15 s > Vault's 10 s PSP timeout. Decision 31; decision 21
+  updated; three failure-mode rows; doc-to-code row; RUNNING.md end-to-end
+  example and the Smart App Control note. Verified: 6 new tests against
+  Postgres with a stub Vault (approved → Authorized with PSP reference;
+  request by token with key `{id}:authorize` and the right body; declined
+  → Declined with code; risk block → RiskBlocked, Vault never called;
+  Vault 409 / 504 → stays RiskApproved with the error), 56/56 Payment
+  tests. End to end through the Gateway with all five services: approved
+  201 Authorized; decline card 201 Declined; reused card token → 422
+  `cvc_unavailable`; Merchant token → 403 (Payment's own rule); no token
+  straight to 7082 → 401; unknown card token → 422 `card_not_found`; PSP
+  down → 502 `psp_unreachable`; JPY 500 → Authorized; rows in psql match;
+  0 card numbers in Payment's log. **Found:** unknown currency → 500
+  (`Money`'s constructor throws during JSON reading, which MVC doesn't turn
+  into a 400; amount 0 would do the same via `Payment`): request now takes
+  plain validated fields, `XYZ` and `0` → 400. **Found:** Smart App
+  Control blocked freshly built PSP/Payment binaries when five services
+  were built in parallel, then the Payment test DLL itself; the owner
+  turned Smart App Control off (RUNNING.md). Final run: build 0/0, 89
+  tests green (15 + 56 + 18), `dotnet test` exit 0; Payment's `.exe`
+  starts normally. Committed.
 
 ## Environment notes
 
@@ -497,8 +531,8 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 4, Module 4.2c — `authorizePayment` happy path** (Payment creates
-the payment, runs the risk stand-in, calls Vault's authorize endpoint and
-moves the payment to Authorized or Declined).
+**Phase 4, Module 4.3 — `capturePayment`** (Authorized → Captured: Payment
+asks the PSP to capture by its authorization id; partial capture; no card
+data needed, so it need not go through Vault — decide that first).
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.

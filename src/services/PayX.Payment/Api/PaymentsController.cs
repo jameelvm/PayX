@@ -1,0 +1,65 @@
+using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using PayX.Contracts;
+using PayX.Payment.Services;
+
+namespace PayX.Payment.Api;
+
+// Doc ch.2: authorizePayment(amount, card_number, expiration_date, CVV,
+// merchant_id). The card details arrive as a Vault token (number, expiry and
+// CVC were given to Vault at checkout, 3.7 / 4.2a); the customer is whoever
+// the access token says, never a field in the body.
+public sealed record AuthorizePaymentRequest([Required] Guid? MerchantId, [Required] AmountRequest? Amount, [Required] string CardToken);
+
+// Plain fields on the way in, not Money: Money's constructor throws on an
+// unknown currency, and an exception during JSON reading becomes a 500, not
+// a 400 (found in 4.2c). Validated here, converted to Money in the action.
+public sealed record AmountRequest(
+    [Range(1, Money.MaxAmountMinor)] long AmountMinor,
+    [Required, RegularExpression("^[A-Z]{3}$")] string Currency);
+
+public sealed record PaymentResponse(string Id, string Status, Guid MerchantId, Money Amount, string? AuthorizationCode,
+    string? DeclineCode)
+{
+    public static PaymentResponse From(Domain.Payment p) =>
+        new(p.Id, p.Status.ToString(), p.MerchantId, p.Amount, p.AuthorizationCode, p.DeclineCode);
+}
+
+[ApiController]
+[Route("api/payments")]
+public sealed class PaymentsController(PaymentAuthorization authorization) : ControllerBase
+{
+    // The Gateway lets Customers and Merchants into /api/payments; inside,
+    // Payment decides per endpoint (decision 21): only a customer pays.
+    [HttpPost, Authorize(Roles = "Customer")]
+    public async Task<IActionResult> Authorize(AuthorizePaymentRequest request, CancellationToken ct)
+    {
+        var customerId = Guid.Parse(User.FindFirst("sub")!.Value);
+
+        Money amount;
+        try
+        {
+            amount = new Money(request.Amount!.AmountMinor, request.Amount.Currency);
+        }
+        catch (ArgumentException ex)   // e.g. a well-formed but unsupported currency
+        {
+            ModelState.AddModelError("amount.currency", ex.Message);
+            return ValidationProblem(ModelState);
+        }
+
+        var result = await authorization.AuthorizeAsync(customerId, request.MerchantId!.Value, amount,
+            request.CardToken, ct);
+
+        if (result.Failure is not null)
+            // The payment exists (its id is in the detail) but has no outcome yet.
+            return Problem(statusCode: result.FailureStatus is >= 500 ? result.FailureStatus : 422,
+                title: result.Failure, detail: $"payment {result.Payment.Id} is {result.Payment.Status}");
+
+        // 201 for every business outcome: Authorized, Declined and RiskBlocked
+        // are all a payment that now exists, with an answer. The status field
+        // says which; like the PSP, a decline is not an HTTP error.
+        // (GET /api/payments/{id} itself arrives in 4.4.)
+        return Created($"/api/payments/{result.Payment.Id}", PaymentResponse.From(result.Payment));
+    }
+}

@@ -107,6 +107,19 @@ curl -X POST localhost:7084/api/vault/cards/<token>/authorizations -H "Content-T
 # a second authorization on the same token → 409 cvc_unavailable (CVC used once)
 ```
 
+### Paying end to end (Module 4.2c)
+
+All five running (Identity, Gateway, Payment, Vault, PSP simulator).
+
+```bash
+# log in as a Customer (see section 3) → $TOKEN; a Merchant's user id is the merchantId
+TOK=$(curl -s -X POST localhost:7084/api/vault/cards -H "Content-Type: application/json" \
+  -d '{"number":"4242424242424242","expMonth":12,"expYear":2030,"cvc":"123"}' | python -c "import sys,json;print(json.load(sys.stdin)['token'])")
+curl -X POST localhost:7080/api/payments -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{\"merchantId\":\"<merchant-user-id>\",\"amount\":{\"amountMinor\":5000,\"currency\":\"USD\"},\"cardToken\":\"$TOK\"}"
+# 201 {"status":"Authorized", ...}; a decline is also 201 with status Declined
+```
+
 Test cards (simulator): `4242424242424242` approves; `4000000000000002`
 generic decline, `4000000000009995` insufficient funds, `4000000000000069`
 expired, `4000000000000127` incorrect CVC.
@@ -137,3 +150,13 @@ so Postgres must be up too (Module 4.1).
   `MSYS_NO_PATHCONV=1`, or use PowerShell.
 - `.sh` files are kept LF by `.gitattributes`; bash inside a container fails
   on CRLF.
+- **Smart App Control** (Windows 11) blocks freshly built, unsigned .NET
+  binaries: "An Application Control policy has blocked this file" when
+  starting a service, or a test project that reports no tests and exits 1.
+  It has no allow-list (Defender exclusions, Dev Drive and self-signed
+  certificates don't help). The fix used on this machine (2026-10-21):
+  Windows Security → App & browser control → Smart App Control → Off.
+  Alternative that keeps it on: build and run under WSL2 or in a container.
+  Before turning it off, a stop-gap for a blocked `.exe` was running the DLL
+  through the signed `dotnet` host:
+  `ASPNETCORE_ENVIRONMENT=Development ASPNETCORE_URLS=http://localhost:7082 dotnet src/services/PayX.Payment/bin/Debug/net10.0/PayX.Payment.dll`
