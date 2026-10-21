@@ -52,7 +52,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 21 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 22 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -62,7 +62,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
-| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 1 / 9 | 🔄 |
+| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 2 / 9 | 🔄 |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
@@ -116,7 +116,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | | Module | What it builds | Concept |
 |---|---|---|---|
 | ✅ | 4.1 | `payments` table + state machine with legal transitions | explicit state machine |
-| 🔍 | 4.2a | Vault holds the CVC until the first authorization | sensitive data: encrypted, TTL, read once |
+| ✅ | 4.2a | Vault holds the CVC until the first authorization | sensitive data: encrypted, TTL, read once |
 | ⬜ | 4.2b | Vault authorizes at the PSP by token | the vault as the only path to card data |
 | ⬜ | 4.2c | `authorizePayment` happy path (risk stand-in) | orchestration |
 | ⬜ | 4.3 | `capturePayment` | authorize vs capture |
@@ -467,7 +467,7 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   3-digit-only rule (`12` → 400); misspelt `cvv` → 400; ready lists
   redis + kms + dynamodb; Redis stopped → ready 503, live 200, tokenize
   with CVC 500; back to 200 after restart; CVC and card number 0 times in
-  the log. Awaiting owner review, then commit.
+  the log. Committed.
 
 ## Environment notes
 
