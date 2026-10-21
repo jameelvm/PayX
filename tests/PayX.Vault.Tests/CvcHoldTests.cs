@@ -2,19 +2,25 @@ using System.Text.Json;
 
 namespace PayX.Vault.Tests;
 
-// The CVC's whole life (4.2a): held encrypted, read once, gone after its TTL.
+// The CVC's whole life (4.2a, changed in 4.7): held encrypted, kept until
+// its authorization completes, then forgotten; gone after its TTL regardless.
 public sealed class CvcHoldTests
 {
     private const string Card = "4242424242424242";
 
     [Fact]
-    public async Task The_cvc_can_be_taken_exactly_once()
+    public async Task The_cvc_is_held_until_it_is_forgotten()
     {
         var vault = TestVault.Create();
         var card = await vault.TokenizeAsync(Card, 12, 2030, cvc: "123", default);
 
-        Assert.Equal("123", await vault.TakeCvcAsync(card.Token, default));
-        Assert.Null(await vault.TakeCvcAsync(card.Token, default));
+        // Readable more than once: a retry after a timeout needs it again.
+        Assert.Equal("123", await vault.GetCvcAsync(card.Token, default));
+        Assert.Equal("123", await vault.GetCvcAsync(card.Token, default));
+
+        await vault.ForgetCvcAsync(card.Token);
+
+        Assert.Null(await vault.GetCvcAsync(card.Token, default));
     }
 
     [Fact]
@@ -44,7 +50,7 @@ public sealed class CvcHoldTests
 
         await Task.Delay(TimeSpan.FromSeconds(1.5));
 
-        Assert.Null(await vault.TakeCvcAsync(card.Token, default));
+        Assert.Null(await vault.GetCvcAsync(card.Token, default));
     }
 
     [Fact]
@@ -53,17 +59,6 @@ public sealed class CvcHoldTests
         var vault = TestVault.Create();
         var card = await vault.TokenizeAsync(Card, 12, 2030, cvc: null, default);
 
-        Assert.Null(await vault.TakeCvcAsync(card.Token, default));
-    }
-
-    [Fact]
-    public async Task Two_simultaneous_takes_get_it_once_between_them()
-    {
-        var vault = TestVault.Create();
-        var card = await vault.TokenizeAsync(Card, 12, 2030, cvc: "123", default);
-
-        var results = await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => vault.TakeCvcAsync(card.Token, default)));
-
-        Assert.Single(results, r => r == "123");
+        Assert.Null(await vault.GetCvcAsync(card.Token, default));
     }
 }

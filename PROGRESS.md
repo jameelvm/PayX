@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 28 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 29 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -64,7 +64,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
-| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 8 / 9 | 🔄 |
+| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 9 / 9 | 🔄 |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
@@ -125,7 +125,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 4.4 | `checkPaymentStatus` | status API |
 | ✅ | 4.5 | Idempotency-Key table: insert or return stored response | never charge twice |
 | ✅ | 4.6 | Concurrent duplicate requests (in-progress lock) | races on retries |
-| ⬜ | 4.7 | Propagating idempotency keys to the PSP (incl. the 4.2b gap: a same-key retry through Vault must replay, not 409) | end-to-end idempotency |
+| ✅ | 4.7 | Propagating idempotency keys to the PSP (incl. the 4.2b gap: a same-key retry through Vault must replay, not 409) | end-to-end idempotency |
 
 ### Phase 5: Risk
 
@@ -594,6 +594,23 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   payment** resumed (1 row), which then hits the 4.2b gap: Vault already
   used the CVC → 422 `cvc_unavailable` (stored as that key's answer, since
   it is a 4xx). Fixed in 4.7. Committed.
+- 4.7 Keys end to end; the 4.2b gap closed. Vault: `CvcStore` now
+  `GetAsync` / `ForgetAsync` (no more `GETDEL`); new `AuthorizationAnswers`
+  (Redis `vault:answer:{token}:{key}`, 24 h). `CardAuthorizer`: card → stored
+  answer for this key? replay (`Replayed`) → CVC (409 if none) → PSP with
+  the key unchanged → definitive (< 500): save answer, then forget the CVC;
+  timeout / unreachable / 5xx: CVC kept. Decision 7 accepted (the full key
+  chain written out); decisions 29 and 30 annotated; the ❌ gap row and the
+  "PSP times out after authorizing" row verified; CLAUDE.md lists
+  `vault:answer:*`. Verified: Vault tests rewritten / added, 19/19 (CVC
+  readable until forgotten; definitive answer forgets it, new key → 409
+  without the PSP; same key → replay, PSP called once; timeout → retry sends
+  the identical body and key; PSP 503 → CVC kept). End to end: PSP down →
+  502, CVC TTL 591 s; PSP back, same key → **201 Authorized, same payment,
+  1 row**; CVC then gone (TTL -2), answer kept (TTL 86,398 s); same key
+  again → Payment replays (`Idempotent-Replayed`); new key on the used
+  token → 422 `cvc_unavailable`; PSP has exactly 1 authorization for the
+  merchant, key `pay_…:authorize`. Committed.
 
 ## Environment notes
 
@@ -603,6 +620,5 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 4, Module 4.7 — keys end to end** (close the 4.2b gap: Vault keeps
-the CVC until the PSP gives a definitive answer and remembers that answer
-per key, so a retry through Vault replays instead of `cvc_unavailable`).
+**Phase 4 wrap-up** — `docs/PAYMENT-CORE.md` (every scenario: API calls
+and backend logic), README Phase 4 section, DESIGN Q&A.

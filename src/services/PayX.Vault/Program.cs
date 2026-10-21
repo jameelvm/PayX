@@ -14,7 +14,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.AddPayXDefaults();
 builder.AddAwsClient<IAmazonKeyManagementService>();
 builder.AddAwsClient<IAmazonDynamoDB>();
-builder.AddRedis();   // CVCs held until first authorization (4.2a)
+builder.AddRedis();   // CVCs until their authorization completes (4.2a), authorization answers (4.7)
 
 builder.Services.AddHealthChecks()
     .AddCheck<KmsReadinessCheck>("kms:card-vault", tags: [HealthEndpoints.ReadyTag], timeout: TimeSpan.FromSeconds(2))
@@ -24,6 +24,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<CardEncryptor>();
 builder.Services.AddSingleton<CardRepository>();
 builder.Services.AddSingleton<CvcStore>();
+builder.Services.AddSingleton<AuthorizationAnswers>();
 builder.Services.AddSingleton<CardVault>();
 builder.Services.AddScoped<CardAuthorizer>();
 

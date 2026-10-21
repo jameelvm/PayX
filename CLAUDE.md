@@ -75,7 +75,7 @@ off Kafka.
 |---|---|---|
 | Gateway | — (YARP, JWT validation, rate limiting) | all services |
 | Identity | Postgres `payx_identity` (users, merchants, credentials) | — |
-| Vault | DynamoDB `payx-card-vault` (KMS-envelope-encrypted PANs → tokens), Redis `vault:cvc:*` (CVC until first authorization) | KMS |
+| Vault | DynamoDB `payx-card-vault` (KMS-envelope-encrypted PANs → tokens), Redis `vault:cvc:*` (CVC until its authorization completes), `vault:answer:*` (PSP answers per key, 24 h) | KMS |
 | Payment | Postgres `payx_payments` (payments, attempts, idempotency keys, outbox) | Risk, PSP (HTTP); Kafka (publish) |
 | Risk | Redis `risk:*` velocity counters, DynamoDB `payx-risk-decisions` | — |
 | Ledger | Postgres `payx_ledger` (append-only journal + account balances / wallets) | Kafka (consume) |

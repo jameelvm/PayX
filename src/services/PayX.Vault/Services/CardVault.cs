@@ -48,8 +48,11 @@ public sealed class CardVault(CardEncryptor encryptor, CardRepository cards, Cvc
         encryptor.DecryptAsync(card.Encrypted, card.Token, ct);
 
     /// <summary>
-    /// The CVC given at tokenization, once: for the first authorization
-    /// (4.2b). Null if it was never given, already used, or expired.
+    /// The CVC given at tokenization, for the first authorization (4.2b).
+    /// Null if it was never given, already used to completion, or expired.
     /// </summary>
-    public Task<string?> TakeCvcAsync(string token, CancellationToken ct) => cvcs.TakeAsync(token, ct);
+    public Task<string?> GetCvcAsync(string token, CancellationToken ct) => cvcs.GetAsync(token, ct);
+
+    /// <summary>The authorization it was for has completed: forget it (4.7).</summary>
+    public Task ForgetCvcAsync(string token) => cvcs.ForgetAsync(token);
 }
