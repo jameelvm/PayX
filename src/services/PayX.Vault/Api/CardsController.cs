@@ -17,6 +17,12 @@ public sealed record TokenizeRequest(
     [Range(2000, 2100)] int ExpYear,
     [RegularExpression("^[0-9]{3,4}$")] string? Cvc);
 
+// The PSP's authorize request without the card: Vault adds it.
+public sealed record AuthorizeRequest(
+    [Range(1, long.MaxValue)] long Amount,
+    [Required, RegularExpression("^[A-Z]{3}$")] string Currency,
+    [Required] string MerchantId);
+
 // What every other service gets instead of a card number.
 public sealed record CardResponse(string Token, string Brand, string Last4, int ExpMonth, int ExpYear)
 {
@@ -25,8 +31,27 @@ public sealed record CardResponse(string Token, string Brand, string Last4, int 
 
 [ApiController]
 [Route("api/vault/cards")]
-public sealed class CardsController(CardVault vault) : ControllerBase
+public sealed class CardsController(CardVault vault, CardAuthorizer authorizer) : ControllerBase
 {
+    // Money moves, so an Idempotency-Key is required (CLAUDE.md conventions);
+    // a missing header is a 400 from model validation.
+    [HttpPost("{token}/authorizations")]
+    public async Task<IActionResult> Authorize(string token, AuthorizeRequest request,
+        [FromHeader(Name = "Idempotency-Key"), Required, StringLength(255)] string idempotencyKey, CancellationToken ct)
+    {
+        var outcome = await authorizer.AuthorizeAsync(token, request.Amount, request.Currency, request.MerchantId,
+            idempotencyKey, ct);
+        if (outcome.Answer is not { } answer)
+            return Problem(statusCode: outcome.ErrorStatus, title: outcome.Error);
+
+        // Relayed as-is, status included: a decline stays a 200 with
+        // status "declined", a PSP 503 stays a 503. The body carries last 4
+        // digits only, never the number.
+        if (answer.Replayed)
+            Response.Headers["Idempotent-Replayed"] = "true";
+        return new ContentResult { StatusCode = answer.StatusCode, Content = answer.Body, ContentType = answer.ContentType };
+    }
+
     [HttpPost]
     public async Task<IActionResult> Tokenize(TokenizeRequest request, CancellationToken ct)
     {

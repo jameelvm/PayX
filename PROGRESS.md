@@ -52,7 +52,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 22 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 23 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -62,7 +62,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
-| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 2 / 9 | 🔄 |
+| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 3 / 9 | 🔄 |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
@@ -117,13 +117,13 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 |---|---|---|---|
 | ✅ | 4.1 | `payments` table + state machine with legal transitions | explicit state machine |
 | ✅ | 4.2a | Vault holds the CVC until the first authorization | sensitive data: encrypted, TTL, read once |
-| ⬜ | 4.2b | Vault authorizes at the PSP by token | the vault as the only path to card data |
+| ✅ | 4.2b | Vault authorizes at the PSP by token | the vault as the only path to card data |
 | ⬜ | 4.2c | `authorizePayment` happy path (risk stand-in) | orchestration |
 | ⬜ | 4.3 | `capturePayment` | authorize vs capture |
 | ⬜ | 4.4 | `checkPaymentStatus` | status API |
 | ⬜ | 4.5 | Idempotency-Key table: insert or return stored response | never charge twice |
 | ⬜ | 4.6 | Concurrent duplicate requests (in-progress lock) | races on retries |
-| ⬜ | 4.7 | Propagating idempotency keys to the PSP | end-to-end idempotency |
+| ⬜ | 4.7 | Propagating idempotency keys to the PSP (incl. the 4.2b gap: a same-key retry through Vault must replay, not 409) | end-to-end idempotency |
 
 ### Phase 5: Risk
 
@@ -468,6 +468,26 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   redis + kms + dynamodb; Redis stopped → ready 503, live 200, tokenize
   with CVC 500; back to 200 after restart; CVC and card number 0 times in
   the log. Committed.
+- 4.2b `POST /api/vault/cards/{token}/authorizations` {amount, currency,
+  merchantId} + required `Idempotency-Key`. `CardAuthorizer`: find card
+  (404 `card_not_found`) → take CVC (409 `cvc_unavailable`) → decrypt
+  number → `PspClient` POSTs the PSP's authorize body with the key
+  forwarded as given → relay status, body and `Idempotent-Replayed`
+  verbatim; PSP timeout → 504 `psp_timeout`, connection failure → 502
+  `psp_unreachable`. Typed `HttpClient` (`Psp:BaseUrl`, `Psp:Timeout` 10 s;
+  Polly later). `CardVault.RevealNumberAsync`. Decision 30, two
+  failure-mode rows (one an open gap), doc-to-code row; 4.7's row now
+  names the gap. Verified: 4 new tests with a stub PSP (exact outbound
+  body: number, expiry, CVC, amount, merchant, key; answer relayed; second
+  authorization → 409 without calling the PSP; unknown token → 404, PSP
+  untouched; slow PSP → 504), 18/18 Vault tests. End to end with the
+  simulator: approved 200 (last4 only); generic-decline and incorrect-CVC
+  cards relayed as 200 `declined`; no key → 400; unknown token → 404; PSP
+  stopped → 502; 0 card numbers or CVCs in either service's log. **Found
+  (the gap):** a same-key retry after success → 409 `cvc_unavailable`,
+  not the PSP's replay; and with the PSP down the CVC was already used up,
+  so even a "nothing happened" failure can't be retried. Recorded for 4.7.
+  Committed.
 
 ## Environment notes
 
@@ -477,8 +497,8 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 4, Module 4.2b — Vault authorizes at the PSP by token**
-(detokenize + take the CVC + call the PSP simulator, forwarding an
-idempotency key; Payment will call this in 4.2c).
+**Phase 4, Module 4.2c — `authorizePayment` happy path** (Payment creates
+the payment, runs the risk stand-in, calls Vault's authorize endpoint and
+moves the payment to Authorized or Declined).
 Design decisions in `DESIGN.md` §1 (esp. 3, 4, 10, 11, 13, 14) still awaiting
 owner confirmation; nothing up to 1.7 depends on them.

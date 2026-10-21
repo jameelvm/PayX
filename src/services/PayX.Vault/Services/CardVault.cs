@@ -41,9 +41,11 @@ public sealed class CardVault(CardEncryptor encryptor, CardRepository cards, Cvc
     /// back in PCI scope.
     /// </summary>
     public async Task<string?> DetokenizeAsync(string token, CancellationToken ct) =>
-        await cards.FindAsync(token, ct) is { } card
-            ? await encryptor.DecryptAsync(card.Encrypted, card.Token, ct)
-            : null;
+        await cards.FindAsync(token, ct) is { } card ? await RevealNumberAsync(card, ct) : null;
+
+    /// <summary>The same, for a card already loaded (saves a second DynamoDB read).</summary>
+    public Task<string> RevealNumberAsync(VaultedCard card, CancellationToken ct) =>
+        encryptor.DecryptAsync(card.Encrypted, card.Token, ct);
 
     /// <summary>
     /// The CVC given at tokenization, once: for the first authorization

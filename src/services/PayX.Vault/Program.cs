@@ -25,6 +25,16 @@ builder.Services.AddSingleton<CardEncryptor>();
 builder.Services.AddSingleton<CardRepository>();
 builder.Services.AddSingleton<CvcStore>();
 builder.Services.AddSingleton<CardVault>();
+builder.Services.AddScoped<CardAuthorizer>();
+
+// Typed client for the PSP. A plain timeout for now; retries, backoff and a
+// circuit breaker (Polly) come in Phases 5-6.
+builder.Services.AddHttpClient<PspClient>(http =>
+{
+    http.BaseAddress = new Uri(builder.Configuration["Psp:BaseUrl"]
+        ?? throw new InvalidOperationException("Missing configuration: Psp:BaseUrl"));
+    http.Timeout = builder.Configuration.GetValue("Psp:Timeout", TimeSpan.FromSeconds(10));
+});
 
 var app = builder.Build();
 

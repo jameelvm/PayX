@@ -100,6 +100,11 @@ curl -X POST localhost:7084/api/vault/cards -H "Content-Type: application/json" 
   -d '{"number":"4242 4242 4242 4242","expMonth":12,"expYear":2030,"cvc":"123"}'
 curl localhost:7084/health/ready     # redis + kms:card-vault + dynamodb:card-vault
 docker exec payx-redis redis-cli TTL vault:cvc:<token>   # CVC held, encrypted, ~600 s
+
+# authorize on the token (needs the PSP simulator running): Vault adds card + CVC
+curl -X POST localhost:7084/api/vault/cards/<token>/authorizations -H "Content-Type: application/json" \
+  -H "Idempotency-Key: demo-2" -d '{"amount":5000,"currency":"USD","merchantId":"m_1"}'
+# a second authorization on the same token → 409 cvc_unavailable (CVC used once)
 ```
 
 Test cards (simulator): `4242424242424242` approves; `4000000000000002`
