@@ -330,6 +330,40 @@ also a one-module experiment if we ever want to compare the two.)
   flags patterns; risk check turns signals into a **decision** (allow /
   challenge / block) with business context (amount, merchant category, customer
   tenure).
+- *The customer double-clicks Pay. What stops two charges?* (Modules
+  4.5–4.6) The checkout sends one `Idempotency-Key` per checkout. Payment
+  claims it with an INSERT on (caller, key), committed before any work: of
+  two simultaneous clicks one wins and runs, the other gets 409
+  `request_in_progress`; a later click gets the stored answer replayed.
+  Only definitive answers are stored; a 5xx releases the key so the retry
+  can still find out what happened.
+- *Why can't Payment use one transaction around the whole request, like the
+  PSP did?* (4.5, decision 31) Because the request calls Vault and the PSP.
+  A transaction held open across network calls holds locks for seconds and
+  can't undo what the bank already did anyway. So Payment commits small
+  steps (claim, Created, RiskApproved, outcome) and makes the sequence
+  resumable instead.
+- *A retry arrives after the first attempt crashed. Isn't creating a fresh
+  payment simplest?* (4.6) It's the dangerous option: the new payment gets a
+  new PSP key, and if the first attempt had reached the bank, the customer
+  carries two holds. The key remembers its payment id (written in the same
+  transaction as the payment), and the retry resumes that payment from the
+  state it reached, with the same PSP key.
+- *Why does the PSP need its own idempotency key if Payment already
+  dedupes?* (4.7, decision 7) Payment's dedupe stops Payment doing the work
+  twice; it can't help when the bank did the work and the answer was lost.
+  Only the bank knows. Each hop derives a stable key (`{paymentId}:authorize`)
+  so a retry is recognised there too.
+- *Where does the CVC live, and for how long?* (4.2a, 4.7) Only in Vault,
+  encrypted in Redis, from checkout until its authorization gets a
+  definitive answer (max 10 minutes). Never in a database, never in
+  Payment. Not "deleted on first read": a timed-out call must be retryable
+  with the identical request.
+- *Why is a decline a 201 and not a 402?* (4.2c) HTTP status describes the
+  request, not the business result. The payment was created and processed;
+  the bank's answer was "no". 4xx/5xx would tell clients "your request was
+  wrong" or "try again", and retrying a decline is exactly what card-testing
+  fraud looks like.
 - *Where are card details encrypted?* In transit with TLS from the browser;
   ideally tokenized before reaching the merchant (hosted fields); at rest only
   inside the vault under KMS envelope encryption. CVV is never stored.

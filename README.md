@@ -501,3 +501,146 @@ only in the Vault, each under its own KMS data key, bound to its token;
 everything else sees a random token, the brand and the last four digits.
 Phase 4 builds PayX's own payment service on top: a state machine,
 orchestration across Vault and the PSP, and idempotency of its own.
+
+---
+
+## Phase 4 — Payment core
+
+**What the phase delivers:** PayX's own payment service. A customer pays by
+card token, a merchant captures, both can check a payment's status, and
+every money-moving call is safe to repeat: a double-click, a retry after an
+outage, or a retry after a crash continues the same payment instead of
+paying twice. Every scenario, with its API calls and backend logic, is in
+[`docs/PAYMENT-CORE.md`](docs/PAYMENT-CORE.md).
+
+```
+ Priya ─ POST /api/payments (Idempotency-Key) ─► Gateway ─► Payment
+          save Created ─► risk (stand-in) ─► save RiskApproved
+          ─► Vault (key pay_…:authorize: card + CVC added) ─► PSP ─► save Authorized / Declined
+ Shop  ─ POST /api/payments/{id}/capture ──────► Payment ─► PSP (key pay_…:capture) ─► save Captured
+ Both  ─ GET  /api/payments/{id} ──────────────► Payment (its own row)
+```
+
+### 4.1 The payment and its state machine
+
+**Built:** the `payments` table and a `Payment` entity whose status changes
+only through methods (`ApproveRisk`, `Authorize`, `Capture`…), each checking
+one table of legal moves. `Money` maps to two columns; `xmin` guards
+against two workers' conflicting moves; check constraints refuse
+inconsistent rows (decision 28).
+
+**Why:** an orchestrated saga (decision 3) needs one place that says how far
+a payment got and what may happen next. No public setter means "make it
+Captured" has to go through `Capture`, which asks the table first.
+
+**Verify:** 48 tests, every from → to pair against a separately written
+spec; capture vs void from two contexts → the second save fails; five bad
+rows refused in psql.
+
+**Talking point:** constraints check rows, not moves. A raw `UPDATE` from
+Created to Voided with a made-up PSP reference passed: shown, and recorded
+as the known gap.
+
+### 4.2a–c Authorize: through Vault, by token
+
+**Built:** Vault holds the CVC encrypted in Redis until its authorization
+completes (4.2a); Vault authorizes by token, adding card and CVC and
+relaying the PSP's answer (4.2b); Payment orchestrates it all behind
+`POST /api/payments` (4.2c). Token validation moved to ServiceDefaults and
+is now enforced by Payment too (customer = `sub`).
+
+**Why:** Payment never sees a card number or CVC, so only Vault is in PCI
+scope. The payment is saved **before** any outside call: if the process dies
+after the bank said yes, a row already shows the attempt (decision 31). A
+decline is a 201 with status `Declined`, not an error: the request worked;
+the bank said no.
+
+**Verify:** approved → 201 Authorized; decline card → 201 Declined;
+Merchant token → 403; no token straight to Payment → 401; unknown currency
+→ 400 (it was a 500: `Money` threw while the JSON was read).
+
+**Talking point:** split from one planned module into three because it held
+three ideas (sensitive data with a lifetime; a proxy that adds card data;
+orchestration).
+
+### 4.3 Capture
+
+**Built:** `POST /api/payments/{id}/capture`, Merchant only and only its own
+payments, partial or full, straight to the PSP (no card data, so no Vault
+hop: decision 32), key `{paymentId}:capture`.
+
+**Why:** every refusal we can predict (state, amount) is checked **before**
+the PSP call, so the bank never captures something we'd refuse to record.
+
+**Verify:** partial $30 of $50 → PSP agrees; capture again → 409; another
+shop → 404; PSP down → 502, payment stays Authorized; the same capture after
+recovery → Captured, one capture at the PSP. The tests caught that PSP
+refusals crashed Payment: `status` is text in a success and a number in a
+ProblemDetails.
+
+### 4.4 checkPaymentStatus
+
+**Built:** `GET /api/payments/{id}` for the payment's customer or merchant;
+anyone else gets the same 404 as a missing id.
+
+**Talking point:** the 201's `Location` named the internal instance
+(`localhost:7082`) through the Gateway; relative URLs are always right
+behind a proxy.
+
+### 4.5 Payment's own Idempotency-Key
+
+**Built:** `[Idempotent]` on authorize and capture: key scoped to the
+caller, claimed with an INSERT **committed before the work**, definitive
+answers stored and replayed (`Idempotent-Replayed`), a different request
+with the same key → 422, a duplicate of a running request → 409
+`request_in_progress`.
+
+**Why:** unlike the PSP (3.4), the claim can't share one transaction with
+the work, because the work calls Vault and the PSP, and a transaction must
+never stay open across network calls. And a 5xx is never stored: it isn't
+an outcome, and replaying it would stop the caller ever finding out.
+
+**Verify:** double-click → one payment; two requests at the same moment →
+201 + 409; 10 simultaneous claims → 1 winner.
+
+### 4.6 Unfinished attempts resume the same payment
+
+**Built:** a 30 s lock on each claim, released on a 5xx, lapsing on a
+crash; a retry takes the key over with one conditional UPDATE (1 winner of
+10). The key stores its **payment id in the same transaction that creates
+the payment**, and authorize runs each step only from its starting state,
+so a retry resumes the same payment (decision 33).
+
+**Why:** deleting a failed key would let the retry create a second payment
+with a new PSP key; if the first attempt had reached the bank, Priya would
+carry two holds.
+
+**Verify:** PSP down → 502 → retry → the same payment resumed (1 row).
+
+### 4.7 Keys end to end
+
+**Built:** Vault keeps the CVC until the PSP's answer is definitive, then
+forgets it, and remembers that answer per token + key for 24 h. The full
+chain: caller key → payment → `{paymentId}:authorize` → Vault → PSP.
+
+**Why:** in 4.2b the CVC was used up before the call, so after a timeout or
+a lost answer, a retry got 409 `cvc_unavailable` instead of the outcome.
+
+**Verify:** PSP down → 502 (CVC kept) → PSP back, same key → **201
+Authorized, one payment, one authorization at the PSP**; CVC gone
+afterwards; Vault's stored answer replays without calling the PSP.
+
+**Talking point:** "read once" was the right instinct for a secret, but it
+fights retries. The CVC's life now ends when its *job* ends (a definitive
+answer), not when it is first read.
+
+### Phase 4 in one paragraph
+
+PayX now owns its payments: a state machine that only allows real moves,
+an orchestrator that writes before it calls, and the card kept behind
+Vault. Every money-moving call carries an idempotency key, and each hop
+turns it into a stable key of its own, so a double-click, an outage or a
+crash ends with one payment and one hold. What remains is everything that
+happens *without* a retry: Phase 5 replaces the risk stand-in, and Phase 6
+adds events (outbox, Kafka), retries with backoff, and the `UNKNOWN` state
+with a resolver for payments nobody comes back for.

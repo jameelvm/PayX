@@ -109,6 +109,9 @@ curl -X POST localhost:7084/api/vault/cards/<token>/authorizations -H "Content-T
 
 ### Paying end to end (Module 4.2c)
 
+Every scenario (double-click, outages, capture, refusals), with its API
+calls and backend logic: [`docs/PAYMENT-CORE.md`](docs/PAYMENT-CORE.md).
+
 All five running (Identity, Gateway, Payment, Vault, PSP simulator).
 
 ```bash

@@ -64,7 +64,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 1 | [Local substrate](#phase-1-local-substrate) | — | 7 / 7 | ✅ |
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
-| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 9 / 9 | 🔄 |
+| 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 9 / 9 | ✅ |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
@@ -207,7 +207,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 
 ## Current state
 
-**Last updated:** 2026-10-19
+**Last updated:** 2026-10-21
 **Phase 0 — design. Draft written, awaiting owner review.** Source PDFs read
 (the schema/detailed-design figures are blank in the PDF export, so the
 storage schema in `DESIGN.md` is inferred from the APIs and text). Stack,
@@ -425,7 +425,7 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   RUNNING.md). Phase 3 wrap-up: README Phase 3 section, RUNNING.md (PSP +
   Vault), DESIGN §3 Q&A (5) and §5 rows. Committed.
 
-**Phase 4 — Payment core. In progress.** Decisions 3 (orchestrated saga),
+**Phase 4 — Payment core. Complete: all nine modules built, verified and committed.** Wrap-up done: `docs/PAYMENT-CORE.md` (every scenario, API calls and backend logic), README Phase 4 section, DESIGN Q&A (6), RUNNING.md pointer. Decisions 3 (orchestrated saga),
 13 (Vault) and 14 (PSP simulator) accepted by the owner on 2026-10-20; 4,
 10 and 11 are confirmed at the start of Phases 6, 7 and 5.
 - 4.1 `payments` table (migration `InitialPayments`) and the state machine.
@@ -611,6 +611,13 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   again → Payment replays (`Idempotent-Replayed`); new key on the used
   token → 422 `cvc_unavailable`; PSP has exactly 1 authorization for the
   merchant, key `pay_…:authorize`. Committed.
+- Phase 4 wrap-up: `docs/PAYMENT-CORE.md` written (15 scenarios: checkout,
+  approve, decline, risk block, double-click, key reuse, outage + retry,
+  crash / lost answer, used card token, status, capture, capture refusals,
+  capture during an outage, plus endpoint / error-code / storage reference
+  and known gaps). One claim checked before writing it: a capture with no
+  body at all captures the full amount (200). README Phase 4 section,
+  DESIGN Q&A (6 entries), RUNNING.md pointer.
 
 ## Environment notes
 
@@ -620,5 +627,6 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 4 wrap-up** — `docs/PAYMENT-CORE.md` (every scenario: API calls
-and backend logic), README Phase 4 section, DESIGN Q&A.
+**Phase 5, Module 5.1 — Risk: rule-based score (amount, card country).**
+First confirm decision 11 (fraud detection + risk check as one Risk
+service), deferred to the start of this phase.
