@@ -36,7 +36,17 @@ Postgres init scripts run only on an empty volume. After changing one:
 across restarts (its bootstrap script recreates everything, including a new
 KMS key).
 
-## 3. Services (run on the host for now)
+## 3. Services
+
+**In containers (default):** `docker compose up -d --build` runs Gateway,
+Identity, Payment, Vault and the PSP simulator on the ports below, next to
+the platform containers. To step through one service in Visual Studio,
+stop its container and press F5 on the same port: [`DEBUGGING.md`](DEBUGGING.md).
+Requests for every scenario: `PayX.http` (Visual Studio) or Scalar at
+`http://localhost:<port>/scalar`.
+
+**On the host (all of them, without containers):** stop the service
+containers first (`docker compose stop gateway identity payment vault psp-simulator`).
 
 ```bash
 dotnet build PayX.slnx

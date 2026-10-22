@@ -10,6 +10,35 @@ name: payx
 #   card vault, risk decisions        -> localstack DynamoDB + KMS
 #   PSP end-of-day settlement file    -> localstack S3
 #   Kafka ("transaction completion")  -> kafka (single KRaft broker) + kafka-ui
+#   load balancer / web servers       -> gateway (YARP)
+#   payment service, card vault, PSP  -> payment, vault, psp-simulator
+#
+# Every service can be swapped for a Visual Studio debug session on the same
+# port: docker compose stop <service>, then F5 that project. See DEBUGGING.md.
+
+# What every PayX service container shares.
+x-service-base: &service-base
+  build: &service-build
+    context: .
+    dockerfile: infra/docker/Service.Dockerfile
+  restart: unless-stopped
+  # payx-host = this machine, as seen from inside a container (Docker
+  # Desktop's host-gateway). Every call from one PayX service to another goes
+  # through it, to the port the target publishes on the host. Whatever is
+  # bound to that port answers: the target's container, or your debugger
+  # after you stopped the container. Infrastructure (postgres, redis,
+  # localstack) never moves, so it is reached directly by container name.
+  extra_hosts:
+    - "payx-host:host-gateway"
+  environment: &service-env
+    ASPNETCORE_ENVIRONMENT: Development
+    ASPNETCORE_URLS: http://+:8080
+    # Docker Desktop publishes an IPv4 and an IPv6 record for host aliases;
+    # .NET tries IPv6 first, which has no route to the host, and every call
+    # to payx-host fails with "Network is unreachable" (seen in SuggestX).
+    DOTNET_SYSTEM_NET_DISABLEIPV6: "1"
+    # Same token rules everywhere; Identity's discovery document via the host.
+    Jwt__MetadataAddress: "http://payx-host:7081/.well-known/openid-configuration"
 
 services:
   # ---------------------------------------------------------------- platform
@@ -137,6 +166,88 @@ services:
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
     ports:
       - "7090:8080"
+
+  # ---------------------------------------------------------------- services
+  #
+  # Each publishes the same port as its Visual Studio launch profile. The
+  # environment variables override appsettings.json's localhost defaults with
+  # container addresses (environment beats appsettings), so one appsettings
+  # file serves both the container and the debugger.
+
+  gateway:
+    <<: *service-base
+    container_name: payx-gateway
+    build: { <<: *service-build, args: { SERVICE: Gateway } }
+    ports:
+      - "7080:8080"
+    environment:
+      <<: *service-env
+      ReverseProxy__Clusters__payment__Destinations__payment-1__Address: "http://payx-host:7082/"
+      ReverseProxy__Clusters__payment__Destinations__payment-2__Address: "http://payx-host:7092/"
+      ReverseProxy__Clusters__identity__Destinations__identity-1__Address: "http://payx-host:7081/"
+
+  identity:
+    <<: *service-base
+    container_name: payx-identity
+    build: { <<: *service-build, args: { SERVICE: Identity } }
+    ports:
+      - "7081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *service-env
+      ConnectionStrings__Identity: "Host=postgres;Port=5432;Database=payx_identity;Username=payx_identity;Password=payx_identity_dev"
+      # The same key file the debugger uses (App/.keys), so tokens issued by
+      # either Identity keep verifying when you swap one for the other.
+      Jwt__SigningKeyPath: "/keys/identity-signing-key.pem"
+    volumes:
+      - ./.keys:/keys
+
+  payment:
+    <<: *service-base
+    container_name: payx-payment
+    build: { <<: *service-build, args: { SERVICE: Payment } }
+    ports:
+      - "7082:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *service-env
+      ConnectionStrings__Payments: "Host=postgres;Port=5432;Database=payx_payments;Username=payx_payments;Password=payx_payments_dev"
+      Vault__BaseUrl: "http://payx-host:7084/"
+      Psp__BaseUrl: "http://payx-host:7088/"
+
+  vault:
+    <<: *service-base
+    container_name: payx-vault
+    build: { <<: *service-build, args: { SERVICE: Vault } }
+    ports:
+      - "7084:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    environment:
+      <<: *service-env
+      ConnectionStrings__Redis: "redis:6379,abortConnect=false"
+      AWS__ServiceURL: "http://localstack:4566"
+      Psp__BaseUrl: "http://payx-host:7088/"
+
+  psp-simulator:
+    <<: *service-base
+    container_name: payx-psp-simulator
+    build: { <<: *service-build, args: { SERVICE: PspSimulator } }
+    ports:
+      - "7088:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *service-env
+      ConnectionStrings__Psp: "Host=postgres;Port=5432;Database=payx_psp;Username=payx_psp;Password=payx_psp_dev"
 
 volumes:
   payx-pgdata:

@@ -1,5 +1,7 @@
 {
   "profiles": {
+    // Same port the container publishes (7080): docker compose stop gateway
+    // first, or this fails to bind. See DEBUGGING.md.
     "Gateway (local)": {
       "commandName": "Project",
       "launchBrowser": false,

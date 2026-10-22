@@ -33,6 +33,9 @@ public static class ServiceDefaultsExtensions
         // The registry each service adds its own readiness checks to.
         builder.Services.AddHealthChecks();
 
+        // OpenAPI + Scalar at /scalar, for sending requests while debugging.
+        builder.Services.AddPayXApiDocs();
+
         return builder;
     }
 
@@ -107,10 +110,22 @@ public static class ServiceDefaultsExtensions
 
     public static WebApplication MapPayXDefaults(this WebApplication app)
     {
+        // Which process answered: "PayX.Payment@<machine>". In a container
+        // the machine name is the container id; under Visual Studio it's this
+        // PC. Shows at a glance whether a request reached the container or
+        // your debugger (DEBUGGING.md), and passes through the Gateway.
+        var instance = $"{app.Environment.ApplicationName}@{Environment.MachineName}";
+        app.Use((context, next) =>
+        {
+            context.Response.Headers["X-PayX-Instance"] = instance;
+            return next(context);
+        });
+
         app.UseExceptionHandler();
         app.UseStatusCodePages();
         app.MapControllers();
         app.MapPayXHealthEndpoints();
+        app.MapPayXApiDocs();
         return app;
     }
 }

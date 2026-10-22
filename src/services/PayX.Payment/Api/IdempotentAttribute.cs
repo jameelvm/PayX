@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
+using PayX.ServiceDefaults;
 using Microsoft.Extensions.Options;
 using PayX.Payment.Services;
 
@@ -13,7 +14,7 @@ namespace PayX.Payment.Api;
 /// conventions) and makes retries with it safe: the first request runs, every
 /// later one gets the first one's answer.
 /// </summary>
-public sealed class IdempotentAttribute() : TypeFilterAttribute(typeof(IdempotencyFilter));
+public sealed class IdempotentAttribute() : TypeFilterAttribute(typeof(IdempotencyFilter)), IRequiresIdempotencyKey;
 
 public sealed class IdempotencyFilter(IdempotencyService idempotency, CurrentIdempotencyKey current,
     IOptions<JsonOptions> json) : IAsyncActionFilter

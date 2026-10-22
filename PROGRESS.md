@@ -618,12 +618,35 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   and known gaps). One claim checked before writing it: a capture with no
   body at all captures the full amount (200). README Phase 4 section,
   DESIGN Q&A (6 entries), RUNNING.md pointer.
+- Debugging setup (owner request, 2026-10-22; not a numbered module):
+  `infra/docker/Service.Dockerfile` + five service containers in compose on
+  the same ports as their Visual Studio profiles; every service-to-service
+  call goes through `payx-host` (host-gateway), so stopping a container and
+  pressing F5 swaps it for the debugger. `.keys` mounted into Identity
+  (one signing key for both). OpenAPI + Scalar on every service
+  (Development; Bearer scheme; `Idempotency-Key` header on endpoints marked
+  `IRequiresIdempotencyKey`). `X-PayX-Instance` response header names the
+  process that answered. `PayX.http` (every PAYMENT-CORE scenario),
+  `PayX.slnLaunch` (two multi-start profiles), `DEBUGGING.md`. Verified:
+  all-containers flow; Payment swapped to local (Gateway container → this
+  PC); Vault swapped to local (Payment container → local Vault); container
+  first then F5 → bind fails; F5 first then container → both run, all
+  traffic to the debugger, container takes over when it stops; every
+  request in `PayX.http` replayed in order and answered as its comment
+  says; the outage scenario in container mode. **Found:** `sh -c "exec
+  dotnet …"` dropped the Gateway's hyphenated override variables (502s):
+  the image now runs the native launcher directly. **Found:** killing the
+  process on a published port killed Docker Desktop.
 
 ## Environment notes
 
 - **Git Bash rewrites container paths.** `docker exec payx-kafka /opt/kafka/bin/…`
   becomes `C:/Program Files/Git/opt/…` and fails. Prefix with
   `MSYS_NO_PATHCONV=1` (or use PowerShell).
+- **Services run in containers since 2026-10-22** (DEBUGGING.md). Never stop
+  "whatever listens on port 70xx": with containers up that is Docker
+  Desktop's port forwarder, and killing it takes Docker Desktop down (done
+  once by accident). Stop only `PayX.*` / `dotnet` processes.
 
 ## Next up
 

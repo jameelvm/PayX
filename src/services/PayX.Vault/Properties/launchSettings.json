@@ -1,8 +1,11 @@
 {
   "profiles": {
+    // Same port the container publishes (7084): docker compose stop vault
+    // first, or this fails to bind. See DEBUGGING.md.
     "Vault (local)": {
       "commandName": "Project",
-      "launchBrowser": false,
+      "launchBrowser": true,
+      "launchUrl": "scalar",
       "applicationUrl": "http://localhost:7084",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"

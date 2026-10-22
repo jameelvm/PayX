@@ -1,0 +1,256 @@
+### PayX — every Payment Core scenario as a request (docs/PAYMENT-CORE.md).
+#
+# Visual Studio: open this file, click "Send request" above a request (or
+# Ctrl+Alt+S). Run them top to bottom: later requests use earlier answers
+# ({{name.response.body.$.field}}). Works the same whether a service runs in
+# its container or under your debugger: see DEBUGGING.md.
+#
+# Every response carries X-PayX-Instance: which process answered
+# (PayX.Payment@<container id> or PayX.Payment@<your PC>).
+#
+# Bump @run to start over with new users (usernames must be unique).
+
+@run = 1
+@gateway = http://localhost:7080
+@vault = http://localhost:7084
+@psp = http://localhost:7088
+@password = correct horse battery
+
+# Cards: 4242424242424242 approves. Each card number has a $5,000 limit that
+# holds and captures use up; when it starts declining with insufficient_funds,
+# switch to another Luhn-valid number: 4111111111111111, 4012888888881881,
+# 5555555555554444, 5105105105105100.
+@card = 4242424242424242
+
+
+############################################################ 0. Users
+
+### Register Priya (customer). 409 if @run was used before: bump it.
+# @name registerPriya
+POST {{gateway}}/api/users
+Content-Type: application/json
+
+{ "username": "priya{{run}}", "email": "priya{{run}}@example.com", "password": "{{password}}", "role": "Customer" }
+
+### Register Shoe Shop (merchant). Its id is the merchantId in payments.
+# @name registerShop
+POST {{gateway}}/api/users
+Content-Type: application/json
+
+{ "username": "shoeshop{{run}}", "email": "shoeshop{{run}}@example.com", "password": "{{password}}", "role": "Merchant" }
+
+### Register Other Shop (another merchant, for the visibility checks).
+# @name registerOther
+POST {{gateway}}/api/users
+Content-Type: application/json
+
+{ "username": "othershop{{run}}", "email": "othershop{{run}}@example.com", "password": "{{password}}", "role": "Merchant" }
+
+### Log in as Priya
+# @name loginPriya
+POST {{gateway}}/api/users/login
+Content-Type: application/json
+
+{ "username": "priya{{run}}", "password": "{{password}}" }
+
+### Log in as Shoe Shop
+# @name loginShop
+POST {{gateway}}/api/users/login
+Content-Type: application/json
+
+{ "username": "shoeshop{{run}}", "password": "{{password}}" }
+
+### Log in as Other Shop
+# @name loginOther
+POST {{gateway}}/api/users/login
+Content-Type: application/json
+
+{ "username": "othershop{{run}}", "password": "{{password}}" }
+
+@priya = {{loginPriya.response.body.$.accessToken}}
+@shop = {{loginShop.response.body.$.accessToken}}
+@other = {{loginOther.response.body.$.accessToken}}
+@merchantId = {{registerShop.response.body.$.id}}
+
+
+############################################################ §2 Checkout: tokenize the card
+
+### Tokenize (card number + CVC go to Vault only). Breakpoint: Vault CardVault.TokenizeAsync
+# @name tokenize
+POST {{vault}}/api/vault/cards
+Content-Type: application/json
+
+{ "number": "{{card}}", "expMonth": 12, "expYear": 2030, "cvc": "123" }
+
+@token = {{tokenize.response.body.$.token}}
+
+
+############################################################ §3 Pay, approved
+
+### Pay $50. Breakpoints: Payment IdempotencyFilter → PaymentAuthorization.AuthorizeAsync
+# → Vault CardAuthorizer.AuthorizeAsync → PSP AuthorizationsController.Authorize
+# @name pay
+POST {{gateway}}/api/payments
+Authorization: Bearer {{priya}}
+Idempotency-Key: checkout-{{run}}-a
+Content-Type: application/json
+
+{ "merchantId": "{{merchantId}}", "amount": { "amountMinor": 5000, "currency": "USD" }, "cardToken": "{{token}}" }
+
+@paymentId = {{pay.response.body.$.id}}
+
+
+############################################################ §6 Double-click: the same request again
+
+### Same key → the same 201, header Idempotent-Replayed: true, no second payment
+POST {{gateway}}/api/payments
+Authorization: Bearer {{priya}}
+Idempotency-Key: checkout-{{run}}-a
+Content-Type: application/json
+
+{ "merchantId": "{{merchantId}}", "amount": { "amountMinor": 5000, "currency": "USD" }, "cardToken": "{{token}}" }
+
+
+############################################################ §7 Same key, different request
+
+### Same key, $60 instead of $50 → 422 idempotency_key_reused_with_different_request
+POST {{gateway}}/api/payments
+Authorization: Bearer {{priya}}
+Idempotency-Key: checkout-{{run}}-a
+Content-Type: application/json
+
+{ "merchantId": "{{merchantId}}", "amount": { "amountMinor": 6000, "currency": "USD" }, "cardToken": "{{token}}" }
+
+### No key → 400 idempotency_key_required
+POST {{gateway}}/api/payments
+Authorization: Bearer {{priya}}
+Content-Type: application/json
+
+{ "merchantId": "{{merchantId}}", "amount": { "amountMinor": 5000, "currency": "USD" }, "cardToken": "{{token}}" }
+
+
+############################################################ §10 Paying again with a used card token
+
+### New key, same token: the CVC was used for the first payment → 422 cvc_unavailable
+POST {{gateway}}/api/payments
+Authorization: Bearer {{priya}}
+Idempotency-Key: checkout-{{run}}-b
+Content-Type: application/json
+
+{ "merchantId": "{{merchantId}}", "amount": { "amountMinor": 5000, "currency": "USD" }, "cardToken": "{{token}}" }
+
+
+############################################################ §11 Status
+
+### Priya sees her payment. Breakpoint: Payment PaymentQueries.FindVisibleAsync
+GET {{gateway}}/api/payments/{{paymentId}}
+Authorization: Bearer {{priya}}
+
+### Shoe Shop sees it too
+GET {{gateway}}/api/payments/{{paymentId}}
+Authorization: Bearer {{shop}}
+
+### Other Shop doesn't → 404 payment_not_found
+GET {{gateway}}/api/payments/{{paymentId}}
+Authorization: Bearer {{other}}
+
+
+############################################################ §13 Capture refused
+
+### Priya (a customer) can't capture → 403
+POST {{gateway}}/api/payments/{{paymentId}}/capture
+Authorization: Bearer {{priya}}
+Idempotency-Key: capture-{{run}}-x
+
+### Other Shop can't capture Shoe Shop's payment → 404
+POST {{gateway}}/api/payments/{{paymentId}}/capture
+Authorization: Bearer {{other}}
+Idempotency-Key: capture-{{run}}-y
+
+### More than authorized → 422 amount_exceeds_authorized (PSP never called)
+POST {{gateway}}/api/payments/{{paymentId}}/capture
+Authorization: Bearer {{shop}}
+Idempotency-Key: capture-{{run}}-z
+Content-Type: application/json
+
+{ "amountMinor": 5001 }
+
+
+############################################################ §12 Capture
+
+### Shoe Shop captures $30 of $50. Breakpoints: Payment PaymentCapture.CaptureAsync
+# → PSP AuthorizationActions (capture)
+POST {{gateway}}/api/payments/{{paymentId}}/capture
+Authorization: Bearer {{shop}}
+Idempotency-Key: capture-{{run}}-a
+Content-Type: application/json
+
+{ "amountMinor": 3000 }
+
+### Same capture, same key → the stored 200, replayed (no second capture)
+POST {{gateway}}/api/payments/{{paymentId}}/capture
+Authorization: Bearer {{shop}}
+Idempotency-Key: capture-{{run}}-a
+Content-Type: application/json
+
+{ "amountMinor": 3000 }
+
+### New key on a captured payment → 409 payment_not_capturable
+POST {{gateway}}/api/payments/{{paymentId}}/capture
+Authorization: Bearer {{shop}}
+Idempotency-Key: capture-{{run}}-b
+
+
+############################################################ §4 Declined
+
+### Tokenize the issuer's "generic decline" test card
+# @name tokenizeDecline
+POST {{vault}}/api/vault/cards
+Content-Type: application/json
+
+{ "number": "4000000000000002", "expMonth": 12, "expYear": 2030, "cvc": "123" }
+
+### Pay with it → 201 with status Declined, declineCode card_declined
+POST {{gateway}}/api/payments
+Authorization: Bearer {{priya}}
+Idempotency-Key: checkout-{{run}}-decline
+Content-Type: application/json
+
+{ "merchantId": "{{merchantId}}", "amount": { "amountMinor": 5000, "currency": "USD" }, "cardToken": "{{tokenizeDecline.response.body.$.token}}" }
+
+
+############################################################ §8 Bank down during payment, then retry
+#
+# 1. Tokenize a fresh card (below).
+# 2. docker compose stop psp-simulator   (or stop your debugger if the PSP runs in VS)
+# 3. Send "Pay (PSP down)" → 502 psp_unreachable; the payment stays RiskApproved
+# 4. docker compose start psp-simulator
+# 5. Send "Pay (PSP down)" again, unchanged → 201 Authorized, the SAME payment id
+# Breakpoints: Payment IdempotencyService.ClaimAsync (Resumed), PaymentAuthorization
+# (ResumeOrCreateAsync, then straight to the Vault step), Vault CardAuthorizer (CVC kept).
+
+### Tokenize a fresh card for this scenario
+# @name tokenizeOutage
+POST {{vault}}/api/vault/cards
+Content-Type: application/json
+
+{ "number": "{{card}}", "expMonth": 12, "expYear": 2030, "cvc": "123" }
+
+### Pay (PSP down) — send once with the PSP stopped, then again after starting it
+POST {{gateway}}/api/payments
+Authorization: Bearer {{priya}}
+Idempotency-Key: checkout-{{run}}-outage
+Content-Type: application/json
+
+{ "merchantId": "{{merchantId}}", "amount": { "amountMinor": 5000, "currency": "USD" }, "cardToken": "{{tokenizeOutage.response.body.$.token}}" }
+
+
+############################################################ PSP simulator directly (Phase 3)
+
+### Authorize at the PSP directly, slowed down by X-Psp-Fault (try error=503 or timeout-after-success too)
+POST {{psp}}/api/psp/authorizations
+Idempotency-Key: psp-direct-{{run}}
+X-Psp-Fault: latency=2000
+Content-Type: application/json
+
+{ "amount": 100, "currency": "USD", "card": { "number": "{{card}}", "expMonth": 12, "expYear": 2030, "cvc": "123" }, "merchantId": "m_direct" }

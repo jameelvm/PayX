@@ -1,8 +1,11 @@
 {
   "profiles": {
+    // Same port the container publishes (7088): docker compose stop psp-simulator
+    // first, or this fails to bind. See DEBUGGING.md.
     "PspSimulator (local)": {
       "commandName": "Project",
-      "launchBrowser": false,
+      "launchBrowser": true,
+      "launchUrl": "scalar",
       "applicationUrl": "http://localhost:7088",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"

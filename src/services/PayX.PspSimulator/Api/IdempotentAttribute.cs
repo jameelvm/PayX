@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
+using PayX.ServiceDefaults;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -16,7 +17,7 @@ namespace PayX.PspSimulator.Api;
 /// Stripe and Adyen take one (Stripe makes it optional; here it is required,
 /// so a caller can't forget it on a money-moving call).
 /// </summary>
-public sealed class IdempotentAttribute() : TypeFilterAttribute(typeof(IdempotencyFilter));
+public sealed class IdempotentAttribute() : TypeFilterAttribute(typeof(IdempotencyFilter)), IRequiresIdempotencyKey;
 
 public sealed class IdempotencyFilter(PspDbContext db, IConfiguration config, IOptions<JsonOptions> json)
     : IAsyncActionFilter

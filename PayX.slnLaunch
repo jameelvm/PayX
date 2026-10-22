@@ -1,0 +1,19 @@
+[
+  {
+    "Name": "Payment core (all five)",
+    "Projects": [
+      { "Path": "src\\services\\PayX.Identity\\PayX.Identity.csproj", "Action": "Start", "DebugTarget": "Identity (local)" },
+      { "Path": "src\\services\\PayX.PspSimulator\\PayX.PspSimulator.csproj", "Action": "Start", "DebugTarget": "PspSimulator (local)" },
+      { "Path": "src\\services\\PayX.Vault\\PayX.Vault.csproj", "Action": "Start", "DebugTarget": "Vault (local)" },
+      { "Path": "src\\services\\PayX.Payment\\PayX.Payment.csproj", "Action": "Start", "DebugTarget": "Payment (local)" },
+      { "Path": "src\\services\\PayX.Gateway\\PayX.Gateway.csproj", "Action": "Start", "DebugTarget": "Gateway (local)" }
+    ]
+  },
+  {
+    "Name": "Payment + Vault",
+    "Projects": [
+      { "Path": "src\\services\\PayX.Vault\\PayX.Vault.csproj", "Action": "Start", "DebugTarget": "Vault (local)" },
+      { "Path": "src\\services\\PayX.Payment\\PayX.Payment.csproj", "Action": "Start", "DebugTarget": "Payment (local)" }
+    ]
+  }
+]
