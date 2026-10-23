@@ -100,6 +100,7 @@
         </select>
       </label>
       <label>Number <input id="cardNumber" class="mono" size="19"></label>
+      <button id="randomCard" title="A Luhn-valid Visa number nobody else uses">Random card</button>
     </div>
     <div class="row">
       <label>Exp. month <input id="expMonth" value="12" size="3"></label>
@@ -194,6 +195,7 @@ function syncCard() {
   $('cardNumber').value = v === 'random' ? randomCard() : v;
 }
 $('cardPreset').onchange = syncCard;
+$('randomCard').onclick = () => { $('cardPreset').value = 'random'; $('cardNumber').value = randomCard(); };
 syncCard();
 
 // One request through the Gateway, logged with what matters for each scenario.
