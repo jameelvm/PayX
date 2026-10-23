@@ -197,6 +197,15 @@ before are gone. Tokenize again.
 **Smart App Control** (Windows 11) can block freshly built binaries: see
 `RUNNING.md`.
 
+**Browsing DynamoDB / S3 / KMS with a GUI (Dynobase etc.).** Such tools
+validate a profile with `sts:GetCallerIdentity` first, so LocalStack runs
+`sts` too. Profile in `%USERPROFILE%\.aws`: `credentials` →
+`[localstack]` with `aws_access_key_id = test`, `aws_secret_access_key = test`;
+`config` → `[profile localstack]` with `region = us-east-1` and
+`endpoint_url = http://localhost:4568`. Region must be `us-east-1` and the
+key `test` (LocalStack's default account, `000000000000`), or the tables
+aren't there.
+
 ---
 
 ## How it works

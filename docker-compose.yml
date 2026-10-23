@@ -87,7 +87,11 @@ services:
     image: localstack/localstack:latest
     container_name: payx-localstack
     environment:
-      SERVICES: s3,dynamodb,kms
+      # sts: not used by PayX itself, but GUI tools (Dynobase, the AWS CLI's
+      # profile checks) call sts:GetCallerIdentity to validate a profile
+      # before anything else; without it they fall back to real AWS, which
+      # rejects LocalStack's dummy "test" key.
+      SERVICES: s3,dynamodb,kms,sts
       AWS_DEFAULT_REGION: us-east-1
       DEBUG: "0"
       # Personal token from the gitignored .env, same as the sibling projects.
