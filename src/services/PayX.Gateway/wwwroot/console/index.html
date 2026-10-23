@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PayX Test Console</title>
+<!--
+  Development-only test console, served by the Gateway at /console/.
+  Clicks through every scenario in docs/PAYMENT-CORE.md against the real
+  services, through the Gateway, and logs each request and answer. Replaced
+  by the real frontend in Phase 10. No build step: plain HTML + JS.
+-->
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #5d6676; --line: #dde1e8;
+    --accent: #2f5bd3; --accent-text: #ffffff; --ok: #1d7a46; --warn: #a15c00; --bad: #b42323;
+    --code: #f0f2f6; --chip: #eef1f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1a1f28; --text: #e4e8ef; --muted: #98a2b3; --line: #2c3340;
+      --accent: #6d8ff0; --accent-text: #0e1220; --ok: #5cc98b; --warn: #e3a64a; --bad: #f07a7a;
+      --code: #141922; --chip: #232a36;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; }
+  header p { margin: 0; color: var(--muted); }
+  main { display: grid; grid-template-columns: minmax(340px, 520px) 1fr; gap: 16px; padding: 16px 20px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 12px 16px; } }
+  section.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
+  section.panel h2 { font-size: 14px; margin: 0 0 8px; display: flex; justify-content: space-between; gap: 8px; }
+  section.panel h2 small { color: var(--muted); font-weight: 400; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
+  label { color: var(--muted); font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
+  input, select { font: inherit; padding: 5px 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--text); min-width: 0; }
+  input.mono, .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px; }
+  button { font: inherit; padding: 6px 10px; border-radius: 5px; border: 1px solid var(--line); background: var(--chip); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .hint { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
+  .facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12.5px; margin-top: 6px; }
+  .facts dt { color: var(--muted); }
+  .facts dd { margin: 0; overflow-wrap: anywhere; }
+  .status { font-weight: 600; }
+  ol.guide { margin: 0; padding-left: 18px; color: var(--muted); font-size: 12.5px; }
+  ol.guide b { color: var(--text); font-weight: 600; }
+  #log { position: sticky; top: 12px; }
+  #log .entries { max-height: calc(100vh - 140px); overflow: auto; }
+  .entry { border-top: 1px solid var(--line); padding: 8px 0; }
+  .entry:first-child { border-top: 0; }
+  .entry .head { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+  .code { font-weight: 700; }
+  .c2 { color: var(--ok); } .c4 { color: var(--warn); } .c5, .c0 { color: var(--bad); }
+  .chip { background: var(--chip); border-radius: 10px; padding: 1px 8px; font-size: 11.5px; color: var(--muted); }
+  .chip.replay { color: var(--accent); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 3px; }
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 5px; padding: 8px; margin: 4px 0 0; overflow: auto; font-size: 12px; max-height: 280px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PayX Test Console</h1>
+  <p>Every call goes through the Gateway (:7080), like a real client. Scenarios: <span class="mono">docs/PAYMENT-CORE.md</span>.</p>
+</header>
+
+<main>
+<div>
+  <section class="panel">
+    <h2>Scenarios <small>do the steps top to bottom</small></h2>
+    <ol class="guide">
+      <li><b>Users</b>: create Priya, Shoe Shop and Other Shop.</li>
+      <li><b>Card → Tokenize</b> (§2), then <b>Pay</b> (§3). Try the decline cards (§4).</li>
+      <li><b>Pay again</b> with the same key: replayed (§6). <b>Double-click</b> (fresh key, needs a fresh card token): 201 + 409 (§6). <b>Same key, +$10</b>: 422 (§7).</li>
+      <li><b>New key + Pay</b> on the same card token: 422 cvc_unavailable (§10).</li>
+      <li><b>Status</b> as each user (§11). <b>Capture</b> as each user, partial and over-amount (§12–13).</li>
+      <li><b>Bank down</b> (§8): see the last panel.</li>
+    </ol>
+  </section>
+
+  <section class="panel">
+    <h2>1 · Users</h2>
+    <div class="row"><button class="primary" id="createUsers">Create users and log in</button></div>
+    <dl class="facts" id="usersFacts"><dt>status</dt><dd>not created yet</dd></dl>
+  </section>
+
+  <section class="panel">
+    <h2>2 · Card <small>Vault: number and CVC never reach Payment</small></h2>
+    <div class="row">
+      <label>Test card
+        <select id="cardPreset">
+          <option value="random">Fresh approving card (random Visa)</option>
+          <option value="4242424242424242">4242 4242 4242 4242 · approves</option>
+          <option value="4000000000000002">4000 0000 0000 0002 · generic decline</option>
+          <option value="4000000000009995">4000 0000 0000 9995 · insufficient funds</option>
+          <option value="4000000000000069">4000 0000 0000 0069 · expired</option>
+          <option value="4000000000000127">4000 0000 0000 0127 · incorrect CVC</option>
+        </select>
+      </label>
+      <label>Number <input id="cardNumber" class="mono" size="19"></label>
+    </div>
+    <div class="row">
+      <label>Exp. month <input id="expMonth" value="12" size="3"></label>
+      <label>Exp. year <input id="expYear" value="2030" size="5"></label>
+      <label>CVC <input id="cvc" value="123" size="4"></label>
+      <button class="primary" id="tokenize">Tokenize</button>
+    </div>
+    <dl class="facts"><dt>card token</dt><dd class="mono" id="tokenOut">—</dd></dl>
+    <p class="hint">Each card number has a $5,000 limit at the bank that holds use up. The random card avoids running out.</p>
+  </section>
+
+  <section class="panel">
+    <h2>3 · Pay <small>as Priya, to Shoe Shop</small></h2>
+    <div class="row">
+      <label>Amount (minor units) <input id="amount" value="5000" size="9" class="mono"></label>
+      <label>Currency <select id="currency"><option>USD</option><option>EUR</option><option>GBP</option><option>INR</option><option>JPY</option><option>KWD</option><option>XYZ</option></select></label>
+    </div>
+    <div class="row">
+      <label>Idempotency-Key <input id="payKey" class="mono" size="30"></label>
+      <button id="newPayKey">New key</button>
+    </div>
+    <div class="row">
+      <button class="primary" id="pay">Pay</button>
+      <button id="payDouble">Double-click (new key, 2 at once)</button>
+      <button id="payReuse">Same key, +$10</button>
+      <button id="payNoKey">Pay without key</button>
+    </div>
+    <dl class="facts"><dt>payment</dt><dd class="mono" id="paymentOut">—</dd><dt>status</dt><dd class="status" id="paymentStatus">—</dd></dl>
+  </section>
+
+  <section class="panel">
+    <h2>4 · Status <small>checkPaymentStatus</small></h2>
+    <div class="row">
+      <button id="statusPriya">as Priya</button>
+      <button id="statusShop">as Shoe Shop</button>
+      <button id="statusOther">as Other Shop</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>5 · Capture <small>the shop takes the money</small></h2>
+    <div class="row">
+      <label>Amount (minor units, empty = all) <input id="captureAmount" size="9" class="mono"></label>
+      <label>Idempotency-Key <input id="captureKey" class="mono" size="26"></label>
+      <button id="newCaptureKey">New key</button>
+    </div>
+    <div class="row">
+      <button class="primary" id="captureShop">Capture as Shoe Shop</button>
+      <button id="capturePriya">as Priya</button>
+      <button id="captureOther">as Other Shop</button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>6 · Bank down during payment <small>§8</small></h2>
+    <ol class="guide">
+      <li>Tokenize a fresh card, click <b>New key</b>.</li>
+      <li>In a terminal: <span class="mono">docker compose stop psp-simulator</span></li>
+      <li><b>Pay</b> → 502 psp_unreachable; the payment stays RiskApproved.</li>
+      <li><span class="mono">docker compose start psp-simulator</span>, wait ~10 s.</li>
+      <li><b>Pay</b> again, same key → 201 Authorized, the <b>same</b> payment id.</li>
+    </ol>
+  </section>
+</div>
+
+<section class="panel" id="log">
+  <h2>Requests <small><button id="clearLog">Clear</button></small></h2>
+  <div class="entries" id="entries"><p class="hint">Requests and answers appear here, newest first. <span class="mono">X-PayX-Instance</span> shows which process answered: a container id, or your PC's name when it's your debugger.</p></div>
+</section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const state = { users: null, merchantId: null, cardToken: null, paymentId: null };
+let seq = 0;
+
+const newKey = prefix => `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
+$('payKey').value = newKey('checkout');
+$('captureKey').value = newKey('capture');
+
+// A Luhn-valid Visa number nobody else uses, so its $5,000 limit is fresh.
+function randomCard() {
+  const digits = [4, ...Array.from({ length: 14 }, () => Math.floor(Math.random() * 10))];
+  const sum = digits.slice().reverse().reduce((acc, d, i) => {
+    if (i % 2 === 0) { d *= 2; if (d > 9) d -= 9; }
+    return acc + d;
+  }, 0);
+  return digits.join('') + ((10 - (sum % 10)) % 10);
+}
+function syncCard() {
+  const v = $('cardPreset').value;
+  $('cardNumber').value = v === 'random' ? randomCard() : v;
+}
+$('cardPreset').onchange = syncCard;
+syncCard();
+
+// One request through the Gateway, logged with what matters for each scenario.
+async function api(method, path, { token, key, body, label } = {}) {
+  const headers = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (key) headers['Idempotency-Key'] = key;
+  const started = performance.now();
+  let status = 0, text = '', resHeaders = new Headers();
+  try {
+    const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    status = res.status; resHeaders = res.headers; text = await res.text();
+  } catch (e) { text = String(e); }
+  const ms = Math.round(performance.now() - started);
+  let json = null; try { json = text ? JSON.parse(text) : null; } catch { }
+  log({ label, method, path, key, token, body, status, ms, json, text, resHeaders });
+  return { status, json, headers: resHeaders };
+}
+
+function log(e) {
+  const n = ++seq;
+  const entries = $('entries');
+  if (n === 1) entries.innerHTML = '';
+  const instances = (e.resHeaders.get('X-PayX-Instance') || '').split(',').map(s => s.trim()).filter(Boolean);
+  const replayed = e.resHeaders.get('Idempotent-Replayed');
+  const outcome = e.json && (typeof e.json.status === 'string' ? e.json.status : e.json.title) || '';
+  const div = document.createElement('div');
+  div.className = 'entry';
+  const sentHeaders = [e.token ? 'Authorization: Bearer …' : null, e.key ? `Idempotency-Key: ${e.key}` : null].filter(Boolean).join('\n');
+  div.innerHTML = `
+    <div class="head">
+      <span class="chip">#${n}</span>
+      <b>${escapeHtml(e.label || '')}</b>
+      <span class="code c${String(e.status)[0]}">${e.status || 'no answer'}</span>
+      <span>${escapeHtml(outcome)}</span>
+      ${replayed ? '<span class="chip replay">Idempotent-Replayed</span>' : ''}
+      <span class="chip">${e.ms} ms</span>
+    </div>
+    <div class="hint mono">${e.method} ${escapeHtml(e.path)}</div>
+    ${instances.map(i => `<span class="chip mono">${escapeHtml(i)}</span>`).join(' ')}
+    <details><summary>request</summary><pre>${escapeHtml(sentHeaders)}${sentHeaders && e.body !== undefined ? '\n\n' : ''}${e.body !== undefined ? escapeHtml(JSON.stringify(e.body, null, 2)) : ''}</pre></details>
+    <details ${e.status >= 400 || !e.status ? 'open' : ''}><summary>response</summary><pre>${escapeHtml(e.json ? JSON.stringify(e.json, null, 2) : e.text)}</pre></details>`;
+  entries.prepend(div);
+}
+const escapeHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function guard(...needs) {
+  for (const [ok, msg] of needs) if (!ok) { alertInline(msg); return false; }
+  return true;
+}
+function alertInline(msg) {
+  log({ label: msg, method: '', path: '', status: 0, ms: 0, json: null, text: '', resHeaders: new Headers() });
+}
+
+// 1 · Users
+$('createUsers').onclick = async () => {
+  const run = Math.random().toString(36).slice(2, 7);
+  const password = 'correct horse battery';
+  const users = { priya: { role: 'Customer' }, shoeshop: { role: 'Merchant' }, othershop: { role: 'Merchant' } };
+  for (const [name, u] of Object.entries(users)) {
+    u.username = `${name}_${run}`;
+    const reg = await api('POST', '/api/users', { label: `Register ${u.username}`, body: { username: u.username, email: `${u.username}@example.com`, password, role: u.role } });
+    u.id = reg.json?.id;
+    const login = await api('POST', '/api/users/login', { label: `Log in ${u.username}`, body: { username: u.username, password } });
+    u.token = login.json?.accessToken;
+  }
+  state.users = users;
+  state.merchantId = users.shoeshop.id;
+  $('usersFacts').innerHTML = `
+    <dt>Priya</dt><dd class="mono">${users.priya.username} · ${users.priya.token ? 'logged in' : 'login failed'}</dd>
+    <dt>Shoe Shop</dt><dd class="mono">${users.shoeshop.username} · merchantId ${users.shoeshop.id}</dd>
+    <dt>Other Shop</dt><dd class="mono">${users.othershop.username}</dd>`;
+};
+
+// 2 · Card
+$('tokenize').onclick = async () => {
+  const r = await api('POST', '/api/vault/cards', {
+    label: 'Tokenize card',
+    body: { number: $('cardNumber').value, expMonth: Number($('expMonth').value), expYear: Number($('expYear').value), cvc: $('cvc').value || null },
+  });
+  if (r.json?.token) {
+    state.cardToken = r.json.token;
+    $('tokenOut').textContent = `${r.json.token}  (${r.json.brand} •••• ${r.json.last4})`;
+  }
+  if ($('cardPreset').value === 'random') syncCard();   // next tokenize gets a fresh card
+};
+
+// 3 · Pay
+function payBody(extraMinor = 0) {
+  return { merchantId: state.merchantId, amount: { amountMinor: Number($('amount').value) + extraMinor, currency: $('currency').value }, cardToken: state.cardToken };
+}
+function showPayment(r) {
+  if (r.json?.id) { state.paymentId = r.json.id; $('paymentOut').textContent = r.json.id; $('paymentStatus').textContent = r.json.status; }
+  else if (r.json?.detail) $('paymentStatus').textContent = `${r.json.title} — ${r.json.detail}`;
+}
+const canPay = () => guard([state.users, 'Create users first'], [state.cardToken, 'Tokenize a card first']);
+$('newPayKey').onclick = () => { $('payKey').value = newKey('checkout'); };
+$('pay').onclick = async () => {
+  if (!canPay()) return;
+  showPayment(await api('POST', '/api/payments', { label: 'Pay', token: state.users.priya.token, key: $('payKey').value, body: payBody() }));
+};
+$('payDouble').onclick = async () => {
+  if (!canPay()) return;
+  // A fresh checkout: with the key of a payment that already finished, both
+  // clicks would just be replays. A new key makes them race for real.
+  $('payKey').value = newKey('checkout');
+  const send = n => api('POST', '/api/payments', { label: `Double-click ${n}/2`, token: state.users.priya.token, key: $('payKey').value, body: payBody() });
+  const results = await Promise.all([send(1), send(2)]);
+  showPayment(results.find(r => r.json?.id) || results[0]);
+};
+$('payReuse').onclick = async () => {
+  if (!canPay()) return;
+  await api('POST', '/api/payments', { label: 'Same key, +$10', token: state.users.priya.token, key: $('payKey').value, body: payBody(1000) });
+};
+$('payNoKey').onclick = async () => {
+  if (!canPay()) return;
+  await api('POST', '/api/payments', { label: 'Pay without key', token: state.users.priya.token, body: payBody() });
+};
+
+// 4 · Status
+const canQuery = () => guard([state.users, 'Create users first'], [state.paymentId, 'Pay first']);
+const status = who => async () => {
+  if (!canQuery()) return;
+  const r = await api('GET', `/api/payments/${state.paymentId}`, { label: `Status as ${who}`, token: state.users[who].token });
+  if (r.json?.id) $('paymentStatus').textContent = r.json.status + (r.json.capturedAmountMinor ? ` (captured ${r.json.capturedAmountMinor})` : '');
+};
+$('statusPriya').onclick = status('priya');
+$('statusShop').onclick = status('shoeshop');
+$('statusOther').onclick = status('othershop');
+
+// 5 · Capture
+$('newCaptureKey').onclick = () => { $('captureKey').value = newKey('capture'); };
+const capture = who => async () => {
+  if (!canQuery()) return;
+  const amount = $('captureAmount').value.trim();
+  const r = await api('POST', `/api/payments/${state.paymentId}/capture`, {
+    label: `Capture as ${who}`, token: state.users[who].token, key: $('captureKey').value,
+    body: amount ? { amountMinor: Number(amount) } : {},
+  });
+  if (r.json?.id) $('paymentStatus').textContent = `${r.json.status} (captured ${r.json.capturedAmountMinor})`;
+};
+$('captureShop').onclick = capture('shoeshop');
+$('capturePriya').onclick = capture('priya');
+$('captureOther').onclick = capture('othershop');
+
+$('clearLog').onclick = () => { seq = 0; $('entries').innerHTML = ''; };
+</script>
+</body>
+</html>

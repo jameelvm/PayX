@@ -42,8 +42,9 @@ KMS key).
 Identity, Payment, Vault and the PSP simulator on the ports below, next to
 the platform containers. To step through one service in Visual Studio,
 stop its container and press F5 on the same port: [`DEBUGGING.md`](DEBUGGING.md).
-Requests for every scenario: `PayX.http` (Visual Studio) or Scalar at
-`http://localhost:<port>/scalar`.
+Click through every scenario in the **test console**:
+`http://localhost:7080/console/`. Or send requests from `PayX.http`
+(Visual Studio) or Scalar at `http://localhost:<port>/scalar`.
 
 **On the host (all of them, without containers):** stop the service
 containers first (`docker compose stop gateway identity payment vault psp-simulator`).

@@ -637,6 +637,19 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
   dotnet …"` dropped the Gateway's hyphenated override variables (502s):
   the image now runs the native launcher directly. **Found:** killing the
   process on a published port killed Docker Desktop.
+- Test console (owner: "don't have UI to test", 2026-10-22): a single page
+  served by the Gateway at `/console/` in Development
+  (`wwwroot/console/index.html`, plain HTML + JS), a button per
+  PAYMENT-CORE scenario and a request log showing status, outcome,
+  `X-PayX-Instance` and `Idempotent-Replayed`. Development-only Gateway
+  route `POST /api/vault/cards` (tokenize only; Vault's authorize endpoint
+  stays unrouted: 404 from the Gateway even with a valid token).
+  Verified by clicking through it in Chrome: users, tokenize, pay 201,
+  replay, double-click 409 + 201, same key +$10 → 422, Other Shop status
+  404, Priya capture 403, partial capture 200, same capture again →
+  replayed. **Found:** the first Double-click button reused the finished
+  payment's key (two replays, no race); it now starts a fresh key.
+  Replaced by the Phase 10 frontend.
 
 ## Environment notes
 

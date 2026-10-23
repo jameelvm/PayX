@@ -185,6 +185,8 @@ services:
       ReverseProxy__Clusters__payment__Destinations__payment-1__Address: "http://payx-host:7082/"
       ReverseProxy__Clusters__payment__Destinations__payment-2__Address: "http://payx-host:7092/"
       ReverseProxy__Clusters__identity__Destinations__identity-1__Address: "http://payx-host:7081/"
+      # Development only (appsettings.Development.json): the test console's card entry.
+      ReverseProxy__Clusters__vault__Destinations__vault-1__Address: "http://payx-host:7084/"
 
   identity:
     <<: *service-base

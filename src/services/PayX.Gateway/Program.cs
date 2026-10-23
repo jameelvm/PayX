@@ -34,6 +34,16 @@ var app = builder.Build();
 // with an empty body instead of the one error shape every service uses.
 app.MapPayXDefaults();
 
+// Development only: the test console at /console/ (wwwroot/console), a page
+// for clicking through every Payment Core scenario until the real frontend
+// arrives in Phase 10. Served before authentication: the page itself is
+// public; the API calls it makes carry tokens like any other client's.
+if (app.Environment.IsDevelopment())
+{
+    app.UseDefaultFiles();
+    app.UseStaticFiles();
+}
+
 app.UseAuthentication();
 app.UseAuthorization();
 

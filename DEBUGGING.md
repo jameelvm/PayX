@@ -79,6 +79,7 @@ the fastest way to see that a request went to the container, not to you.
 
 | Tool | Where | Notes |
 |---|---|---|
+| **Test console** | `http://localhost:7080/console/` (Development) | A web page with a button for every scenario: create users, enter a card, pay, double-click, reuse a key, status as each user, capture. Logs every request and answer with `X-PayX-Instance` and `Idempotent-Replayed`. Served by the Gateway, so everything goes through it. |
 | **`PayX.http`** | repo root; open in Visual Studio | Every scenario from [`docs/PAYMENT-CORE.md`](docs/PAYMENT-CORE.md), in order. Logs in, keeps the tokens and ids from earlier answers. Needs Visual Studio 17.12 or later (request variables). |
 | **Scalar** | `http://localhost:7081/scalar` (Identity), `:7082/scalar` (Payment), `:7084/scalar` (Vault), `:7088/scalar` (PSP) | A page per service to send requests from the browser. Paste an access token into **Authentication → Bearer** once. Endpoints that need an `Idempotency-Key` show it as a required header. Development only. |
 | curl | anywhere | examples in [`RUNNING.md`](RUNNING.md) |
