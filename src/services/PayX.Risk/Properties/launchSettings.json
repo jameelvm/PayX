@@ -1,0 +1,15 @@
+{
+  "profiles": {
+    // Same port the container publishes (7083): docker compose stop risk
+    // first, or this fails to bind. See DEBUGGING.md.
+    "Risk (local)": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "launchUrl": "scalar",
+      "applicationUrl": "http://localhost:7083",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}

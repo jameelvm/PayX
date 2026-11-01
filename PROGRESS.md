@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 29 / 70 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 30 / 71 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -65,7 +65,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 9 / 9 | ✅ |
-| 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 0 / 5 | ⬜ |
+| 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 1 / 6 | 🔄 |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
 | 8 | [Settlement + Reconciliation](#phase-8-settlement--reconciliation) | reconciliation system | 0 / 4 | ⬜ |
@@ -131,11 +131,12 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 
 | | Module | What it builds | Concept |
 |---|---|---|---|
-| ⬜ | 5.1 | Rule-based score (amount, card country) | risk scoring |
+| ✅ | 5.1 | Risk service: rule-based score (amount, card country) with reasons | risk scoring |
 | ⬜ | 5.2 | Velocity counter in Redis (sliding window) | real-time signals |
 | ⬜ | 5.3 | Score → allow / challenge / block | decision vs detection |
-| ⬜ | 5.4 | Payment calls Risk with a Polly timeout | timeouts |
-| ⬜ | 5.5 | Circuit breaker + amount-threshold fallback | fallback |
+| ⬜ | 5.4 | Vault derives card country from the BIN; returned with the token | card metadata without the PAN |
+| ⬜ | 5.5 | Payment calls Risk with a Polly timeout | timeouts |
+| ⬜ | 5.6 | Circuit breaker + amount-threshold fallback | fallback |
 
 ### Phase 6: Reliability
 
@@ -663,6 +664,16 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 5, Module 5.1 — Risk: rule-based score (amount, card country).**
-First confirm decision 11 (fraud detection + risk check as one Risk
-service), deferred to the start of this phase.
+**Module 5.2 — velocity counter in Redis (sliding window).**
+
+2026-10-31: decision 11 accepted (one Risk service). Card country: Vault
+derives it from the BIN (owner's choice), added as new module 5.4; old
+5.4/5.5 renumbered 5.5/5.6. 5.1 takes the country as an input and doesn't
+care where it comes from.
+
+5.1 done (2026-11-01): `PayX.Risk` (port 7083, compose service `risk`,
+profile "Risk (local)"), `POST /api/risk/assessments` → score 0–100 +
+reasons. `PayX.Risk.Tests` 13/13. Verified locally and in the container
+(`X-PayX-Instance: PayX.Risk@<container>`): same scores; a `HomeCountry`
+edit applies to the next request without a restart; no Gateway route
+(401 at :7080).

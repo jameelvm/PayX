@@ -17,6 +17,7 @@ COPY src/services/PayX.Identity/PayX.Identity.csproj               src/services/
 COPY src/services/PayX.Payment/PayX.Payment.csproj                 src/services/PayX.Payment/
 COPY src/services/PayX.Vault/PayX.Vault.csproj                     src/services/PayX.Vault/
 COPY src/services/PayX.PspSimulator/PayX.PspSimulator.csproj       src/services/PayX.PspSimulator/
+COPY src/services/PayX.Risk/PayX.Risk.csproj                       src/services/PayX.Risk/
 RUN dotnet restore "src/services/PayX.${SERVICE}/PayX.${SERVICE}.csproj"
 
 COPY src/ src/

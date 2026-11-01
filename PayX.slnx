@@ -5,6 +5,7 @@
     <Project Path="src/services/PayX.Identity/PayX.Identity.csproj" />
     <Project Path="src/services/PayX.Payment/PayX.Payment.csproj" />
     <Project Path="src/services/PayX.PspSimulator/PayX.PspSimulator.csproj" />
+    <Project Path="src/services/PayX.Risk/PayX.Risk.csproj" />
     <Project Path="src/services/PayX.Vault/PayX.Vault.csproj" />
   </Folder>
   <Folder Name="/src/shared/">
@@ -14,6 +15,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/PayX.Contracts.Tests/PayX.Contracts.Tests.csproj" />
     <Project Path="tests/PayX.Payment.Tests/PayX.Payment.Tests.csproj" />
+    <Project Path="tests/PayX.Risk.Tests/PayX.Risk.Tests.csproj" />
     <Project Path="tests/PayX.Vault.Tests/PayX.Vault.Tests.csproj" />
   </Folder>
 </Solution>
