@@ -10,10 +10,11 @@ public class RiskRulesTests
         AmountBands = new() { ["USD"] = new() { ElevatedMinor = 100_000, HighMinor = 500_000 } },
         HomeCountry = "US",
         HighRiskCountries = ["XR"],
+        Velocity = new() { Window = TimeSpan.FromMinutes(10), ElevatedCount = 3, HighCount = 5 },
     };
 
-    private static RiskScore Score(long amountMinor, string currency = "USD", string? country = "US") =>
-        RiskRules.Score(new RiskInput("pay_test", new Money(amountMinor, currency), country), Settings);
+    private static RiskScore Score(long amountMinor, string currency = "USD", string? country = "US", int recent = 1) =>
+        RiskRules.Score(new RiskInput("pay_test", new Money(amountMinor, currency), country, recent), Settings);
 
     private static string[] Codes(RiskScore s) => s.Reasons.Select(r => r.Code).ToArray();
 
@@ -70,4 +71,14 @@ public class RiskRulesTests
         Assert.Equal(RiskRules.MaxScore, s.Score);
         Assert.Equal(["amount_high", "card_country_high_risk"], Codes(s));
     }
+
+    [Theory]
+    [InlineData(1, 0)]                                // this payment alone
+    [InlineData(2, 0)]
+    [InlineData(3, RiskRules.VelocityElevated)]       // limits are inclusive
+    [InlineData(4, RiskRules.VelocityElevated)]
+    [InlineData(5, RiskRules.VelocityHigh)]           // high replaces elevated
+    [InlineData(12, RiskRules.VelocityHigh)]
+    public void Velocity(int recent, int expected) =>
+        Assert.Equal(expected, Score(5_000, recent: recent).Score);
 }

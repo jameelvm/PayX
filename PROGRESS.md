@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 30 / 71 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 31 / 71 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -65,7 +65,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 9 / 9 | ✅ |
-| 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 1 / 6 | 🔄 |
+| 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 2 / 6 | 🔄 |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
 | 8 | [Settlement + Reconciliation](#phase-8-settlement--reconciliation) | reconciliation system | 0 / 4 | ⬜ |
@@ -132,7 +132,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | | Module | What it builds | Concept |
 |---|---|---|---|
 | ✅ | 5.1 | Risk service: rule-based score (amount, card country) with reasons | risk scoring |
-| ⬜ | 5.2 | Velocity counter in Redis (sliding window) | real-time signals |
+| ✅ | 5.2 | Velocity counter in Redis (sliding window), per customer | real-time signals |
 | ⬜ | 5.3 | Score → allow / challenge / block | decision vs detection |
 | ⬜ | 5.4 | Vault derives card country from the BIN; returned with the token | card metadata without the PAN |
 | ⬜ | 5.5 | Payment calls Risk with a Polly timeout | timeouts |
@@ -664,7 +664,17 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Module 5.2 — velocity counter in Redis (sliding window).**
+**Module 5.3 — score → allow / challenge / block.**
+
+5.2 done (2026-11-01): `risk:velocity:customer:{id}` sorted set, one Lua script (trim,
+`ZADD NX` by payment id, `PEXPIRE`, `ZCARD`) on Redis's own clock. The
+request gains `customerId` (required). Rule: ≥3 in 10 min → +15, ≥5 → +40.
+Per customer, not per card: tokens are per checkout and Risk has no stable
+card id yet; a card fingerprint could ride along with the country in 5.4
+(open question for the owner). `PayX.Risk.Tests` 24/24. Verified in the
+container: counts 1→5, a repeated payment id not counted twice, customers
+separate, key TTL ≈ window; Redis stopped → readiness 503 and assessments
+500 (Payment's fallback is 5.6), back to 200 when Redis returns.
 
 2026-10-31: decision 11 accepted (one Risk service). Card country: Vault
 derives it from the BIN (owner's choice), added as new module 5.4; old

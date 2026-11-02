@@ -226,13 +226,19 @@ services:
       Psp__BaseUrl: "http://payx-host:7088/"
 
   # Internal only (no Gateway route): Payment calls it before any money is
-  # asked for (5.4). No dependencies yet; Redis velocity counters arrive in 5.2.
+  # asked for (5.5). Redis holds its velocity counters (5.2).
   risk:
     <<: *service-base
     container_name: payx-risk
     build: { <<: *service-build, args: { SERVICE: Risk } }
     ports:
       - "7083:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *service-env
+      ConnectionStrings__Redis: "redis:6379,abortConnect=false"
 
   vault:
     <<: *service-base
