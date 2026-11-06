@@ -30,7 +30,7 @@ public sealed class CardVaultTests
             new Dictionary<string, AttributeValue> { ["token"] = new() { S = card.Token } })).Item;
 
         Assert.Equal(
-            ["brand", "ciphertext", "created_at", "encrypted_data_key", "exp_month", "exp_year", "kms_key_arn", "last4", "token"],
+            ["brand", "ciphertext", "country", "created_at", "encrypted_data_key", "exp_month", "exp_year", "kms_key_arn", "last4", "token"],
             item.Keys.Order());
         Assert.DoesNotContain(item.Values, v => v.S?.Contains(Card) == true);
     }

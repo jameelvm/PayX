@@ -92,7 +92,9 @@
       <label>Test card
         <select id="cardPreset">
           <option value="random">Fresh approving card (random Visa)</option>
-          <option value="4242424242424242">4242 4242 4242 4242 · approves</option>
+          <option value="4242424242424242">4242 4242 4242 4242 · approves · US</option>
+          <option value="4000008260000000">4000 0082 6000 0000 · approves · GB (cross-border)</option>
+          <option value="4000009900000004">4000 0099 0000 0004 · approves · XR (high-risk test country)</option>
           <option value="4000000000000002">4000 0000 0000 0002 · generic decline</option>
           <option value="4000000000009995">4000 0000 0000 9995 · insufficient funds</option>
           <option value="4000000000000069">4000 0000 0000 0069 · expired</option>
@@ -279,7 +281,7 @@ $('tokenize').onclick = async () => {
   });
   if (r.json?.token) {
     state.cardToken = r.json.token;
-    $('tokenOut').textContent = `${r.json.token}  (${r.json.brand} •••• ${r.json.last4})`;
+    $('tokenOut').textContent = `${r.json.token}  (${r.json.brand} •••• ${r.json.last4} · ${r.json.country ?? 'country unknown'})`;
   }
   if ($('cardPreset').value === 'random') syncCard();   // next tokenize gets a fresh card
 };

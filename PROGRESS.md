@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 32 / 71 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 33 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -65,7 +65,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 9 / 9 | ✅ |
-| 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 3 / 6 | 🔄 |
+| 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 4 / 7 | 🔄 |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
 | 8 | [Settlement + Reconciliation](#phase-8-settlement--reconciliation) | reconciliation system | 0 / 4 | ⬜ |
@@ -134,9 +134,10 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 5.1 | Risk service: rule-based score (amount, card country) with reasons | risk scoring |
 | ✅ | 5.2 | Velocity counter in Redis (sliding window), per customer | real-time signals |
 | ✅ | 5.3 | Score → allow / challenge / block | decision vs detection |
-| ⬜ | 5.4 | Vault derives card country from the BIN; returned with the token | card metadata without the PAN |
-| ⬜ | 5.5 | Payment calls Risk with a Polly timeout | timeouts |
-| ⬜ | 5.6 | Circuit breaker + amount-threshold fallback | fallback |
+| ✅ | 5.4 | Vault derives card country from the BIN; returned with the token | card metadata without the PAN |
+| ⬜ | 5.5 | Payment calls Risk before the bank (stand-in replaced; Challenged state; score stored) | orchestration step |
+| ⬜ | 5.6 | Polly timeout on the Risk call | timeouts |
+| ⬜ | 5.7 | Circuit breaker + amount-threshold fallback | fallback |
 
 ### Phase 6: Reliability
 
@@ -664,7 +665,20 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Module 5.4 — Vault derives card country from the BIN.**
+**Module 5.5 — Payment calls Risk before the bank.**
+
+2026-11-05: owner agreed to split the old 5.5 (call + timeout) into 5.5
+(the call), 5.6 (timeout) and 5.7 (circuit breaker + fallback). Phase 5 is
+now 7 modules, the project 72.
+
+5.4 done (2026-11-05): `CardNumber.CountryOf` (8-digit BIN first, then 6; test table:
+424242/400000/555555 → US, 40000082 → GB, 40000099 → XR, else null),
+derived at tokenization, stored as DynamoDB attribute `country` (left out
+when unknown), returned as `country` by tokenize and GET. Console: GB and
+XR test cards, country shown after Tokenize. Vault tests 27/27 (the GB
+prefix was first written as 40000826; the test caught it). Verified in the
+container through the Gateway. Note for 5.5: the console's random cards
+have unknown BINs → Risk adds card_country_unknown (+15), still Allow.
 
 5.3 done (2026-11-05): `RiskPolicy.Decide(score, thresholds)`; `Risk:Decision`
 (ChallengeAt 40, BlockAt 80, inclusive), separate from `Risk:Rules`,

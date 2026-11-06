@@ -23,10 +23,12 @@ public sealed record AuthorizeRequest(
     [Required, RegularExpression("^[A-Z]{3}$")] string Currency,
     [Required] string MerchantId);
 
-// What every other service gets instead of a card number.
-public sealed record CardResponse(string Token, string Brand, string Last4, int ExpMonth, int ExpYear)
+// What every other service gets instead of a card number. Country: for
+// Risk (via Payment, 5.5); null when the BIN is unknown.
+public sealed record CardResponse(string Token, string Brand, string Last4, int ExpMonth, int ExpYear, string? Country)
 {
-    public static CardResponse From(VaultedCard c) => new(c.Token, c.Brand, c.Last4, c.ExpMonth, c.ExpYear);
+    public static CardResponse From(VaultedCard c) =>
+        new(c.Token, c.Brand, c.Last4, c.ExpMonth, c.ExpYear, c.Country);
 }
 
 [ApiController]

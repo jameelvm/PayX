@@ -25,8 +25,11 @@ public sealed class CardVault(CardEncryptor encryptor, CardRepository cards, Cvc
 
         var encrypted = await encryptor.EncryptAsync(number, token, ct);
 
+        // Derived now, while the number is in hand, and stored in the clear
+        // like brand and last 4: reading it later must not cost a KMS
+        // decryption, and the issuing country is not cardholder data.
         var card = new VaultedCard(token, encrypted, CardNumber.BrandOf(number), number[^4..],
-            expMonth, expYear, clock.GetUtcNow());
+            expMonth, expYear, clock.GetUtcNow(), CardNumber.CountryOf(number));
         await cards.AddAsync(card, ct);
         return card;
     }
