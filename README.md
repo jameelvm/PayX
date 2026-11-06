@@ -652,7 +652,9 @@ real service, consulted before every authorization, plus everything that
 keeps checkout working when it misbehaves. A risky payment is challenged
 or blocked before the bank is ever asked; a slow Risk costs a checkout at
 most 2 seconds; a dead Risk is skipped quickly, and small payments keep
-flowing while large ones wait.
+flowing while large ones wait. The whole design in one place (architecture,
+flow, states, risk logic, circuit breaker, every scenario):
+[`docs/PAYMENT-CORE-AND-RISK.md`](docs/PAYMENT-CORE-AND-RISK.md).
 
 ```
  Priya ─ Pay ─► Payment: save Created
