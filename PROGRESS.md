@@ -665,10 +665,18 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 5 wrap-up (README, DESIGN, RUNNING, DEBUGGING), then Phase 6,
-Module 6.1 — outbox table, written in the payment's transaction.** First
-confirm decision 4 (one Kafka topic per aggregate), deferred to the start
-of Phase 6.
+**Phase 6, Module 6.1 — outbox table, written in the payment's
+transaction.** First confirm decision 4 (one Kafka topic per aggregate),
+deferred to the start of this phase.
+
+**Phase 5 complete (2026-11-06): all seven modules committed; wrap-up done**
+— README Phase 5 teaching section, DESIGN (6 failure-mode rows, 6 Q&A
+entries, decision 12 accepted, open questions, 7 doc-to-code rows), RUNNING
+(Risk, cards by country, outage drill), DEBUGGING (Risk port, breakpoints,
+"Payment + Risk" launch profile). Open from Phase 5 (DESIGN §4): per-card
+velocity (card fingerprint), Risk's own decision record in
+`payx-risk-decisions`, the 3-D Secure challenge flow, a timeout on Vault's
+country lookup.
 
 5.7 done (2026-11-06): circuit breaker in the Risk pipeline, outside the
 timeout (FailureRatio 0.5, MinimumThroughput 5, SamplingDuration 30 s,

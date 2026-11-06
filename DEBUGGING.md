@@ -16,6 +16,7 @@ Every service has **two homes on the same port**:
 | Gateway | 7080 | `gateway` | `Gateway (local)` |
 | Identity | 7081 | `identity` | `Identity (local)` |
 | Payment | 7082 | `payment` | `Payment (local)` |
+| Risk | 7083 | `risk` | `Risk (local)` |
 | Vault | 7084 | `vault` | `Vault (local)` |
 | PSP simulator | 7088 | `psp-simulator` | `PspSimulator (local)` |
 
@@ -57,7 +58,7 @@ docker compose start payment
 ```
 
 Several at once: the solution has a Visual Studio launch profile file,
-`PayX.slnLaunch`. Pick **"Payment + Vault"** or **"Payment core (all five)"**
+`PayX.slnLaunch`. Pick **"Payment + Vault"**, **"Payment + Risk"** or **"Payment core (all five)"**
 in the start dropdown, after stopping those containers
 (`docker compose stop payment vault`, or all five).
 
@@ -119,6 +120,9 @@ services you want to step through.
 | §11 Status | Payment | `Services/PaymentQueries.cs` → `FindVisibleAsync` | the `CustomerId == callerId \|\| MerchantId == callerId` filter |
 | §12 Capture | Payment, PSP | Payment `Services/PaymentCapture.cs` → `CaptureAsync`; `Domain/Payment.cs` → `CaptureRefusal`; `Services/PspClient.cs` → `CaptureAsync`. PSP `Services/AuthorizationActions.cs` → `CaptureAsync`; `Domain/Authorization.cs` → `Capture` | refusals happen before the PSP call |
 | §13 Capture refused | Payment | `PaymentCapture.CaptureAsync` (merchant filter, `CaptureRefusal`) | the PSP is never called |
+| Risk scoring (Phase 5) | Risk | `Api/AssessmentsController.cs` → `Assess`; `Repositories/SlidingWindowCounter.cs` → `RecordAsync`; `Domain/RiskRules.cs` → `Score`; `Domain/RiskPolicy.cs` → `Decide` | `recent` (velocity count), `score.Reasons`, `decision` |
+| Payment asks Risk (5.5) | Payment | `Services/PaymentAuthorization.cs` → the `Created` block; `Services/FallbackRiskCheck.cs` → `CheckAsync`; `Services/RiskClient.cs` → `CheckAsync` | `card?.Country` from Vault; `assessment.Decision`; which `catch` fires when Risk fails |
+| Risk outage (5.6–5.7) | Payment | `RiskClient.CheckAsync`: the `BrokenCircuitException` and `TimeoutRejectedException` catches; `FallbackRiskCheck` the threshold check | pausing in Risk itself trips Payment's 2 s timeout: debug Risk with `Risk:Timeout` raised in Payment's settings |
 | Token checks | Payment or Gateway | ServiceDefaults `JwtAuthenticationExtensions.cs` (configuration); add `options.Events` there to break on `OnAuthenticationFailed` | `User.FindFirst("sub")` in the controllers |
 
 **Pausing too long:** the Gateway gives up on a request after its own

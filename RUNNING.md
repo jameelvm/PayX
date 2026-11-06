@@ -26,7 +26,7 @@ docker compose ps        # postgres, redis, localstack, kafka healthy; kafka-ini
 | Container | Host port | What it is |
 |---|---|---|
 | `payx-postgres` | 5434 | Six databases, one login role each (admin: `payx_admin` / `payx_admin`) |
-| `payx-redis` | 6381 | Vault: CVCs until first authorization (`vault:cvc:*`); Risk velocity counters (Phase 5) |
+| `payx-redis` | 6381 | Vault: CVCs until first authorization (`vault:cvc:*`); Risk velocity counters (`risk:velocity:*`, 5.2) |
 | `payx-localstack` | 4568 | S3, DynamoDB, KMS |
 | `payx-kafka` | 9094 | Kafka broker (containers use `kafka:9092`) |
 | `payx-kafka-ui` | 7090 | http://localhost:7090 |
@@ -39,7 +39,7 @@ KMS key).
 ## 3. Services
 
 **In containers (default):** `docker compose up -d --build` runs Gateway,
-Identity, Payment, Vault and the PSP simulator on the ports below, next to
+Identity, Payment, Risk, Vault and the PSP simulator on the ports below, next to
 the platform containers. To step through one service in Visual Studio,
 stop its container and press F5 on the same port: [`DEBUGGING.md`](DEBUGGING.md).
 Click through every scenario in the **test console**:
@@ -47,7 +47,7 @@ Click through every scenario in the **test console**:
 (Visual Studio) or Scalar at `http://localhost:<port>/scalar`.
 
 **On the host (all of them, without containers):** stop the service
-containers first (`docker compose stop gateway identity payment vault psp-simulator`).
+containers first (`docker compose stop gateway identity payment risk vault psp-simulator`).
 
 ```bash
 dotnet build PayX.slnx
@@ -148,6 +148,38 @@ expired, `4000000000000127` incorrect CVC.
 Each card number has a $5,000 limit that holds and captures use up, so
 repeated demos on one card eventually decline: use a fresh Luhn-valid number.
 
+### Risk (Phase 5)
+
+Payment asks Risk (port 7083, internal: no Gateway route) before every
+authorization, so Risk must be running for payments to go through
+normally. Risk needs Redis.
+
+```bash
+# ask Risk directly (Scalar: http://localhost:7083/scalar)
+curl -X POST localhost:7083/api/risk/assessments -H "Content-Type: application/json"   -d '{"paymentId":"pay_demo","customerId":"6f1c2b9e-0000-4000-8000-000000000001","amountMinor":600000,"currency":"USD","cardCountry":"GB"}'
+# {"decision":"Challenge","score":65,"reasons":[{"code":"amount_high","points":50},{"code":"cross_border","points":15}]}
+```
+
+Cards by country (Vault derives it from the BIN, 5.4): `4242424242424242`
+US, `4000008260000000` GB (cross-border), `4000009900000004` XR (the
+high-risk test country). Random console cards have no known country.
+
+| Pay through the Gateway | Expected |
+|---|---|
+| $50, US card | 201 `Authorized` |
+| $6,000, GB card (fresh customer) | 201 `Challenged` |
+| $6,000, XR card | 201 `RiskBlocked` |
+| 5+ payments by one customer within 10 minutes | velocity points: Challenge / Block sooner |
+
+**Risk outage drill (5.6–5.7):** `docker pause payx-risk`, then pay $500
+several times: 504 `risk_timeout` after 2 s each, then 503
+`risk_circuit_open` instantly once the breaker opens; a $50 payment still
+goes through (fallback, stored with reason `risk_unavailable_fallback`).
+`docker unpause payx-risk`, wait 15 s: back to normal. Policy lives in
+configuration: `Risk:Rules` and `Risk:Decision` in Risk's
+`appsettings.json` (applied on the next request), `Risk:Timeout`,
+`Risk:CircuitBreaker` and `Risk:Fallback` in Payment's.
+
 **LocalStack is not persistent.** Restarting it creates a new KMS key and an
 empty `payx-card-vault` table, so every token from before the restart is gone.
 
@@ -164,6 +196,7 @@ than skip, when it is down: a crypto test that silently skips is worse
 than one that fails.
 `PayX.Payment.Tests` include two integration tests against `payx_payments`,
 so Postgres must be up too (Module 4.1).
+`PayX.Risk.Tests` include Redis tests (velocity, 5.2): Redis must be up.
 
 ## Windows / Git Bash notes
 

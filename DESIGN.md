@@ -289,11 +289,16 @@ also a one-module experiment if we ever want to compare the two.)
 |---|---|---|---|
 | Customer double-clicks Pay | Two charges | Client-generated Idempotency-Key + PG unique key + stored response | ✅ 4.5 (repeat → same payment, `Idempotent-Replayed`; true double-click → 201 + 409 `request_in_progress`, one payment; 10 simultaneous claims → 1 winner) |
 | PSP times out after authorizing | Retry → second auth, or sale marked failed while customer charged | Same PSP idempotency key on retry; `UNKNOWN` + resolver | PSP side ✅ 3.4 (a retry with the same key replays), reproducible on demand ✅ 3.5 (`X-Psp-Fault: timeout-after-success`); caller side ✅ 4.7 (PSP down → 502; same key after recovery → Authorized, one payment, one PSP authorization); without a retry: 6.4–6.5 |
-| PSP returns 5xx / is slow | Payment fails although a retry would succeed; or threads pile up waiting | Retry with backoff + jitter (a 5xx did no work, so retrying is safe); timeouts | Reproducible ✅ 3.5 (`error=503`, `latency=ms`; injected 5xx claims no idempotency key); caller side: 5.4, 6.3 |
+| PSP returns 5xx / is slow | Payment fails although a retry would succeed; or threads pile up waiting | Retry with backoff + jitter (a 5xx did no work, so retrying is safe); timeouts | Reproducible ✅ 3.5 (`error=503`, `latency=ms`; injected 5xx claims no idempotency key); caller side: 6.3 |
 | PaymentService crashes after DB commit, before publishing event | Ledger never credits merchant | Outbox: event is in the same commit; relay publishes on restart | — |
 | Ledger consumer crashes mid-processing | Event lost or applied twice | Commit offset only after PG commit; `processed_events` dedupe | — |
 | Kafka unavailable | Payments can't announce completion | Outbox buffers in PG; payment API still works; relay drains on recovery | — |
-| Risk service down | All payments blocked | Circuit breaker + amount-threshold fallback (dec. 12) | — |
+| Risk service down | All payments blocked | Circuit breaker + amount-threshold fallback (dec. 12) | ✅ 5.7 (drill with Risk paused: 4 × 504 in ~2 s, then 503 `risk_circuit_open` in 0.03 s; a $50 payment Authorized via the fallback, stored with no score; after the break, normal) |
+| Risk service slow | Every checkout hangs; threads, DB connections and idempotency locks pile up until Payment falls over | 2 s Polly timeout on the Risk call; payment stays Created, retryable 504 | ✅ 5.6 (`docker pause payx-risk` → 504 in 2.1 s instead of up to 100 s; same key after recovery → same payment) |
+| Risk retried for the same payment | Velocity counts one payment twice and blocks an honest customer | Sorted-set member = payment id, `ZADD NX` | ✅ 5.2 (repeated assessment counted once) |
+| Fraudster sends a convenient card country | Cross-border / high-risk rules dodged | Country derived by Vault from the BIN, never taken from the client | ✅ 5.4–5.5 |
+| Risk's thresholds misconfigured (challenge above block) | One decision silently unreachable | Validated at startup: Risk refuses to start | ✅ 5.3 |
+| Redis down (Risk) | Velocity can't be counted | Readiness 503, assessments fail → Payment's breaker and fallback (5.7) | ✅ 5.2 (ready 503, back to 200 on recovery) |
 | PSP sends duplicate / out-of-order webhooks | Double capture/refund | Webhook dedupe by PSP event id; state machine rejects illegal transitions | — |
 | Settlement file disagrees with ledger | Silent money loss | Reconciliation flags discrepancy for investigation | — |
 | Authorized but never captured (auth expiry) | Merchant loses sale | Capture deadline job; void/alert | — |
@@ -373,6 +378,38 @@ also a one-module experiment if we ever want to compare the two.)
 - *Buy button hit many times?* Idempotency key generated once per checkout
   session, disabled button client-side, server dedupe as the real guarantee.
 
+- *Detection vs decision: why two steps with two configs?* (5.1–5.3) The
+  score answers "how suspicious is this?" and is tuned by fraud analysts as
+  patterns change. The thresholds answer "how much risk do we accept?" and
+  belong to the business, which trades lost sales against fraud losses and
+  moves them for a sale day or an attack without touching a rule. Three
+  outcomes, not two: a challenge resolves the middle band.
+- *Why a sliding window for velocity?* (5.2) A fixed bucket resets on the
+  clock: 5 payments at 10:09 and 5 at 10:10 look like 5 per window twice.
+  A sorted set of timestamps trimmed to "now minus 10 minutes" always sees
+  the whole burst. One Lua script makes trim-add-count atomic across
+  instances, and Redis's own clock keeps them consistent.
+- *Risk is slow. Why is that worse than Risk being down?* (5.6) Down fails
+  in milliseconds; slow holds every checkout's thread, DB connection and
+  idempotency lock while it waits, until Payment itself runs out. Every
+  synchronous call on the critical path needs a timeout shorter than the
+  caller's patience.
+- *Timeout, circuit breaker, fallback: what does each add?* (5.6–5.7) The
+  timeout bounds one call. The breaker notices that calls keep failing and
+  stops making them for a while (fast failure, and no extra load on a
+  struggling service), then probes with one call. The fallback decides
+  what the business does meanwhile. Order matters: the breaker wraps the
+  timeout so timeouts count as failures.
+- *Risk is down: approve or decline?* (5.7, decision 12) Neither for
+  everything. Fail open = a fraud window (fraudsters watch for outages);
+  fail closed = a checkout outage. Approve below a small threshold, where
+  fraud is cheap, mark those payments for review, and make larger ones
+  retry later. Not a final block: Risk never judged them.
+- *Should the customer see why they were blocked?* (5.5) No: the score and
+  reasons are stored on the payment for analysts and disputes, but the
+  response says only `RiskBlocked`. Reasons in the response teach a
+  fraudster which rule to dodge.
+
 - *Liveness vs readiness: what is each for?* (Module 1.5) Liveness = "is the
   process stuck?" and the orchestrator **restarts** it on failure, so it runs
   no dependency checks. Readiness = "can it take work now?" and the load
@@ -439,8 +476,10 @@ also a one-module experiment if we ever want to compare the two.)
   contrast with the hand-rolled orchestrator.
 - Multi-currency and FX — out of scope initially (single currency per merchant).
 - ~~Where the CVC travels~~: decided 2026-10-21, Vault holds it (decision 29, Module 4.2a).
-- Card fingerprint in Vault (`DESIGN.md` schema lists it): an HMAC of the number to recognise the same card across tokens. Not needed until Risk counts per-card velocity (5.2).
-- 3-D Secure challenge flow — modelled as a `CHALLENGED` state; full flow deferred.
+- Card fingerprint in Vault (`DESIGN.md` schema lists it): an HMAC of the number to recognise the same card across tokens. Phase 5 counts velocity per customer only; a fingerprint would add per-card velocity (the stronger card-testing signal).
+- Risk decision audit record in `payx-risk-decisions` (DynamoDB, bootstrapped in 1.3, still unused): Payment stores score and reasons on the payment, but Risk keeps no history of its own.
+- 3-D Secure challenge flow — modelled as the final `Challenged` state (5.5); completing a challenge is deferred.
+- Vault's country lookup before the Risk call has only Vault's 15 s client timeout, not Risk's 2 s pipeline (5.6).
 - Multi-PSP routing / failover — mention only, unless time allows.
 - Payouts from merchant available balance to bank — deferred.
 - Refresh tokens and token revocation (Module 2.3 issues 15-minute access
@@ -476,10 +515,17 @@ every phase; rows for later phases are added when they land.
 | Idempotency for transient failures (ch.2), provider side; status lookup | 3.4 | [`PspSimulator/Api/IdempotentAttribute.cs`](src/services/PayX.PspSimulator/Api/IdempotentAttribute.cs), [`Domain/IdempotencyRecord.cs`](src/services/PayX.PspSimulator/Domain/IdempotencyRecord.cs) |
 | Transient failures: timeouts, 5xx (ch.2), made reproducible | 3.5 | [`PspSimulator/Api/FaultInjection.cs`](src/services/PayX.PspSimulator/Api/FaultInjection.cs) |
 | Payment service; card flow authorize → capture as states (ch.2) | 4.1 | [`Payment/Domain/PaymentStateMachine.cs`](src/services/PayX.Payment/Domain/PaymentStateMachine.cs), [`Domain/Payment.cs`](src/services/PayX.Payment/Domain/Payment.cs), [`Repositories/PaymentsDbContext.cs`](src/services/PayX.Payment/Repositories/PaymentsDbContext.cs) |
-| `authorizePayment(amount, card, …, merchant_id)` (ch.2 API design); payment service → fraud check → gateway (ch.2 HLD) | 4.2c | [`Payment/Services/PaymentAuthorization.cs`](src/services/PayX.Payment/Services/PaymentAuthorization.cs), [`Api/PaymentsController.cs`](src/services/PayX.Payment/Api/PaymentsController.cs), [`Services/RiskCheck.cs`](src/services/PayX.Payment/Services/RiskCheck.cs) (stand-in) |
+| `authorizePayment(amount, card, …, merchant_id)` (ch.2 API design); payment service → fraud check → gateway (ch.2 HLD) | 4.2c | [`Payment/Services/PaymentAuthorization.cs`](src/services/PayX.Payment/Services/PaymentAuthorization.cs), [`Api/PaymentsController.cs`](src/services/PayX.Payment/Api/PaymentsController.cs), [`Services/RiskCheck.cs`](src/services/PayX.Payment/Services/RiskCheck.cs) (stand-in until 5.5) |
 | Retries after a crash or timeout continue, not repeat (ch.2 transient failures) | 4.6 | `IdempotencyService.ClaimAsync` (takeover), `PaymentAuthorization.ResumeOrCreateAsync` |
 | "Buy button hit many times?" Idempotency key (ch.2 transient failures / Q&A) | 4.5 | [`Payment/Api/IdempotentAttribute.cs`](src/services/PayX.Payment/Api/IdempotentAttribute.cs), [`Services/IdempotencyService.cs`](src/services/PayX.Payment/Services/IdempotencyService.cs), [`Domain/IdempotencyRecord.cs`](src/services/PayX.Payment/Domain/IdempotencyRecord.cs) |
 | `checkPaymentStatus(payment_id)` (ch.2 API design) | 4.4 | [`Payment/Services/PaymentQueries.cs`](src/services/PayX.Payment/Services/PaymentQueries.cs), `GET /api/payments/{id}` |
 | `capturePayment(authorization_code, amount)` (ch.2 API design); card flow phase 2 (ch.2) | 4.3 | [`Payment/Services/PaymentCapture.cs`](src/services/PayX.Payment/Services/PaymentCapture.cs), [`Services/PspClient.cs`](src/services/PayX.Payment/Services/PspClient.cs), `Payment.CaptureRefusal` |
 | Payment service → payment gateway: card data added only at the last hop (ch.2 HLD) | 4.2b | [`Vault/Services/CardAuthorizer.cs`](src/services/PayX.Vault/Services/CardAuthorizer.cs), [`Services/PspClient.cs`](src/services/PayX.Vault/Services/PspClient.cs) |
 | Card details: tokenized, never stored outside the vault; CVV never stored (ch.2) | 3.7, 4.2a (CVC held until first authorization: [`Vault/Repositories/CvcStore.cs`](src/services/PayX.Vault/Repositories/CvcStore.cs)) | [`Vault/Services/CardVault.cs`](src/services/PayX.Vault/Services/CardVault.cs), [`Api/CardsController.cs`](src/services/PayX.Vault/Api/CardsController.cs), [`Repositories/CardRepository.cs`](src/services/PayX.Vault/Repositories/CardRepository.cs) |
+| Fraud detection + risk check, one service (ch.2; decision 11) | 5.1 | [`Risk/Domain/RiskRules.cs`](src/services/PayX.Risk/Domain/RiskRules.cs), [`Api/AssessmentsController.cs`](src/services/PayX.Risk/Api/AssessmentsController.cs) |
+| Risk check's real-time signals (ch.2) | 5.2 | [`Risk/Repositories/SlidingWindowCounter.cs`](src/services/PayX.Risk/Repositories/SlidingWindowCounter.cs) |
+| Risk check turns signals into a decision (ch.2) | 5.3 | [`Risk/Domain/RiskPolicy.cs`](src/services/PayX.Risk/Domain/RiskPolicy.cs) |
+| Card metadata for risk without the PAN (ch.2 security) | 5.4 | `CardNumber.CountryOf` in [`Vault/Domain/VaultedCard.cs`](src/services/PayX.Vault/Domain/VaultedCard.cs) |
+| Payment service → fraud detection + risk check → gateway (ch.2 HLD) | 5.5 | [`Payment/Services/RiskClient.cs`](src/services/PayX.Payment/Services/RiskClient.cs), `PaymentAuthorization.AuthorizeAsync` |
+| Transient failures: timeouts (ch.2) | 5.6 | [`Payment/Services/RiskClientRegistration.cs`](src/services/PayX.Payment/Services/RiskClientRegistration.cs) (`AddTimeout`) |
+| Transient failures: fallbacks (ch.2; decision 12) | 5.7 | same file (`AddCircuitBreaker`), [`Payment/Services/FallbackRiskCheck.cs`](src/services/PayX.Payment/Services/FallbackRiskCheck.cs) |

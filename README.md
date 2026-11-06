@@ -644,3 +644,153 @@ crash ends with one payment and one hold. What remains is everything that
 happens *without* a retry: Phase 5 replaces the risk stand-in, and Phase 6
 adds events (outbox, Kafka), retries with backoff, and the `UNKNOWN` state
 with a resolver for payments nobody comes back for.
+
+## Phase 5 — Risk
+
+**What the phase delivers:** the doc's "fraud detection + risk check" as a
+real service, consulted before every authorization, plus everything that
+keeps checkout working when it misbehaves. A risky payment is challenged
+or blocked before the bank is ever asked; a slow Risk costs a checkout at
+most 2 seconds; a dead Risk is skipped quickly, and small payments keep
+flowing while large ones wait.
+
+```
+ Priya ─ Pay ─► Payment: save Created
+                  ├─ Vault: GET card → country (from the BIN)
+                  └─ FallbackRiskCheck ─► RiskClient ─[circuit breaker ─ 2 s timeout]─► Risk
+                                                                                     ├ velocity (Redis sliding window)
+                                                                                     ├ rules → score 0-100 + reasons
+                                                                                     └ thresholds → Allow / Challenge / Block
+                  Allow     → save RiskApproved → Vault → PSP (as in Phase 4)
+                  Challenge → save Challenged   (bank never asked)
+                  Block     → save RiskBlocked  (bank never asked)
+                  no answer → small amount: Allow (marked fallback) · else 502/503/504, payment stays Created
+```
+
+### 5.1 Risk service: a rule-based score with reasons
+
+**Built:** `PayX.Risk` (port 7083, internal: no Gateway route),
+`POST /api/risk/assessments`. `RiskRules.Score` is a pure function: amount
+bands per currency (unconfigured currency = `amount_unrated`, not safe),
+card country (unknown / high-risk / cross-border). Score 0-100, capped,
+with every rule that fired as a reason. Decision 11: fraud detection and
+risk check are one service.
+
+**Why:** a score with reasons can be explained to an analyst, a customer
+and a dispute; a bare number can't. Weights are code (they define what a
+score means); thresholds are configuration read through `IOptionsMonitor`,
+so a policy edit applies to the next request.
+
+**Verify:** 13 tests. `curl` the endpoint: $50 US → 0; $1,500 GB → 35
+(`amount_elevated` + `cross_border`); $9,000 XR → 100.
+
+**Talking point:** a pure scoring function can be re-run on yesterday's
+payments to test a new threshold before it goes live.
+
+### 5.2 Velocity: a sliding window in Redis
+
+**Built:** `SlidingWindowCounter`: a sorted set per customer
+(`risk:velocity:customer:{id}`), one Lua script that trims entries older
+than the window, adds the payment with `ZADD NX`, sets `PEXPIRE` and counts.
+≥3 payments in 10 minutes → +15, ≥5 → +40.
+
+**Why:** card testing (a fraudster trying stolen cards) shows up as bursts.
+A fixed window (`INCR` per 10-minute bucket) resets on the clock, so 5 at
+10:09 and 5 at 10:10 look like "5 per window" twice. The sliding window
+always looks back the full 10 minutes.
+
+**Verify:** 11 tests, 5 against the real Redis (counts, a repeated payment
+id counted once, expiry, separate customers, key TTL).
+
+**Talking point:** the member is the payment id, so a retried assessment
+doesn't count twice; the time comes from Redis's `TIME`, so instances with
+skewed clocks agree.
+
+### 5.3 Score → allow / challenge / block
+
+**Built:** `RiskPolicy.Decide` with `Risk:Decision` thresholds
+(ChallengeAt 40, BlockAt 80), separate from the scoring rules and validated
+at startup (contradictory thresholds refuse to start).
+
+**Why:** detection ("how suspicious?") and decision ("how much risk do we
+accept?") change for different reasons and belong to different people:
+fraud analysts tune rules, the business sets its appetite. Lowering
+ChallengeAt to 30 turned a score of 35 into Challenge with no rule touched.
+
+**Talking point:** three outcomes, not two. Between "fine" and "fraud" is a
+band where blocking loses good customers and allowing lets fraud through; a
+challenge asks for something a fraudster with only card details can't give.
+
+### 5.4 Card country from the BIN
+
+**Built:** `CardNumber.CountryOf` in Vault: the leading digits looked up in
+a BIN table, 8 digits first, then 6. Stored with the card like brand and
+last 4, returned as `country`. Test cards: 4242… US, 4000 0082 6000 0000 GB,
+4000 0099 0000 0004 XR.
+
+**Why:** Risk needs the issuing country, and only Vault ever sees the
+number. Derived once at tokenization so reading it later costs no KMS call.
+
+**Talking point:** BINs have been 8 digits since 2022; the GB and XR test
+cards share their first 6 digits with the US range, so a 6-digit lookup
+would get them wrong. (A test caught a typo in the GB prefix.)
+
+### 5.5 Payment asks Risk before the bank
+
+**Built:** `RiskClient` replaces the allow-everything stand-in. It asks
+Vault for the card's country, then Risk. New final status `Challenged`;
+`risk_score` and `risk_reasons` columns on `payments`.
+
+**Why:** the country comes from Vault, not the browser, because a fraudster
+would send "US". Score and reasons are stored for analysts and disputes
+and never returned to the customer, who would learn which rule to dodge.
+
+**Verify:** through the Gateway: $50 US → Authorized; $6,000 GB →
+RiskBlocked (velocity added points); $50 XR → Challenged. Risk stopped →
+502, payment Created; Risk back, same key → the same payment Authorized.
+
+### 5.6 Timeout
+
+**Built:** the Risk client's `HttpClient` runs a Polly v8 resilience
+pipeline (`Microsoft.Extensions.Http.Resilience`) with a 2 s timeout.
+
+**Why:** a slow dependency is worse than a dead one. Every waiting checkout
+holds a thread, a DB connection and an idempotency lock; enough of them and
+Payment falls over although Payment did nothing wrong.
+
+**Verify:** `docker pause payx-risk`, then pay: 504 `risk_timeout` in 2.1 s
+(was up to 100 s); unpause, same key → the same payment Authorized.
+
+### 5.7 Circuit breaker and fallback
+
+**Built:** a circuit breaker outside the timeout (≥5 calls in 30 s, half
+failed → open 15 s, then one trial call), and `FallbackRiskCheck` around the
+client (decision 12): Risk without an answer and an amount under about $100
+→ Allow, stored with no score and reason `risk_unavailable_fallback`;
+anything larger → the retryable error, payment left Created.
+
+**Why:** fail open makes a Risk outage a fraud window; fail closed makes it
+a checkout outage. A threshold keeps cheap payments flowing and holds
+expensive ones. The breaker stops spending 2 s per checkout on a service
+that is known to be down, and stops piling load on it while it recovers.
+
+**Verify:** the outage drill (Risk paused): four $500 payments 504 after
+~2 s each, the 5th and 6th 503 `risk_circuit_open` in 0.03 s, a $50 payment
+Authorized via the fallback; unpaused, after the break everything is normal.
+
+**Talking point:** order inside the pipeline matters. The breaker wraps the
+timeout, so timeouts count as failures; the other way round, a hung Risk
+would never trip the breaker.
+
+### Phase 5 in one paragraph
+
+Payments are now judged before money is asked for: Risk scores each one
+from its amount, the card's country and the customer's recent burst of
+payments, explains the score, and turns it into allow, challenge or block
+by thresholds the business owns. Payment calls it with a 2-second limit,
+stops calling it while it is failing, and lets only small payments through
+unchecked when it can't answer. The bank never sees a challenged or blocked
+payment. Still open: the challenge itself (3-D Secure) isn't built, Risk
+doesn't keep an audit record of decisions, and velocity is per customer,
+not per card. Phase 6 makes payments announce themselves (outbox, Kafka)
+and adds retries and the `UNKNOWN` state.

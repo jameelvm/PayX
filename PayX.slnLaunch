@@ -22,5 +22,20 @@
         "DebugTarget": "Payment (local)"
       }
     ]
+  },
+  {
+    "Name": "Payment + Risk",
+    "Projects": [
+      {
+        "Path": "src\\services\\PayX.Risk\\PayX.Risk.csproj",
+        "Action": "Start",
+        "DebugTarget": "Risk (local)"
+      },
+      {
+        "Path": "src\\services\\PayX.Payment\\PayX.Payment.csproj",
+        "Action": "Start",
+        "DebugTarget": "Payment (local)"
+      }
+    ]
   }
 ]
