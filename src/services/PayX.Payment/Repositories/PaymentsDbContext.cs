@@ -45,6 +45,7 @@ public sealed class PaymentsDbContext(DbContextOptions<PaymentsDbContext> option
                     "status NOT IN ('Authorized', 'Captured', 'Voided') OR psp_authorization_id IS NOT NULL");
                 t.HasCheckConstraint("ck_payments_captured_amount",
                     "(status = 'Captured') = (captured_amount_minor IS NOT NULL)");
+                t.HasCheckConstraint("ck_payments_risk_score", "risk_score IS NULL OR risk_score BETWEEN 0 AND 100");
             });
 
             payment.HasKey(p => p.Id);
@@ -63,6 +64,7 @@ public sealed class PaymentsDbContext(DbContextOptions<PaymentsDbContext> option
             payment.Property(p => p.PspAuthorizationId).HasMaxLength(40);
             payment.Property(p => p.AuthorizationCode).HasMaxLength(6);
             payment.Property(p => p.DeclineCode).HasMaxLength(32);
+            payment.Property(p => p.RiskReasons).HasMaxLength(200);
         });
     }
 }

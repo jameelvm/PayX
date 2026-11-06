@@ -6,7 +6,7 @@ using PayX.Payment.Repositories;
 namespace PayX.Payment.Services;
 
 /// <param name="Failure">Set when the payment couldn't reach a business
-/// outcome (Authorized, Declined, RiskBlocked); the payment is left where it got to.</param>
+/// outcome (Authorized, Declined, Challenged, RiskBlocked); the payment is left where it got to.</param>
 public sealed record AuthorizationResult(Domain.Payment Payment, int FailureStatus = 0, string? Failure = null);
 
 /// <summary>
@@ -16,6 +16,7 @@ public sealed record AuthorizationResult(Domain.Payment Payment, int FailureStat
 ///
 /// <code>
 /// save Created ─► risk ─► save RiskApproved ─► Vault → PSP ─► save Authorized / Declined
+///                   ├──► save Challenged  (PSP never called)
 ///                   └──► save RiskBlocked (PSP never called)
 /// </code>
 ///
@@ -36,13 +37,22 @@ public sealed class PaymentAuthorization(PaymentsDbContext db, IRiskCheck risk, 
     {
         var payment = await ResumeOrCreateAsync(customerId, merchantId, amount, cardToken, ct);
 
-        // Risk first: a blocked payment never reaches the PSP.
+        // Risk first (5.5): only an allowed payment reaches the PSP. No
+        // answer from Risk → the payment stays Created and the caller gets
+        // the 5xx; a retry with the same key asks Risk again.
         if (payment.Status == PaymentStatus.Created)
         {
-            if (await risk.CheckAsync(payment, ct) == RiskDecision.Block)
-                payment.BlockRisk();
-            else
-                payment.ApproveRisk();
+            var check = await risk.CheckAsync(payment, ct);
+            if (check.Assessment is not { } assessment)
+                return new AuthorizationResult(payment, check.FailureStatus, check.Failure);
+
+            payment.RecordRiskAssessment(assessment.Score, assessment.Reasons);
+            switch (assessment.Decision)
+            {
+                case RiskDecision.Allow: payment.ApproveRisk(); break;
+                case RiskDecision.Challenge: payment.ChallengeRisk(); break;
+                default: payment.BlockRisk(); break;   // anything unrecognised fails closed
+            }
             await db.SaveChangesAsync(ct);
         }
 

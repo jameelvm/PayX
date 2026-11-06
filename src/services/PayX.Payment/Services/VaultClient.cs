@@ -8,6 +8,9 @@ public sealed record PspAuthorization(string AuthorizationId, string Status, str
 
 /// <param name="Authorization">Set when the PSP answered (approved or declined).</param>
 /// <param name="StatusCode">Otherwise the HTTP status, or 504 when nothing came back in time.</param>
+/// <summary>What Vault shows any service about a card: no number, no CVC.</summary>
+public sealed record VaultCard(string Token, string Brand, string Last4, string? Country);
+
 public sealed record VaultAuthorizeResult(PspAuthorization? Authorization, int StatusCode, string? Error);
 
 /// <summary>
@@ -45,6 +48,23 @@ public sealed class VaultClient(HttpClient http)
         catch (HttpRequestException)
         {
             return new VaultAuthorizeResult(null, 502, "vault_unreachable");
+        }
+    }
+
+    /// <summary>
+    /// The card's safe details (5.5: its country, for Risk), or null when
+    /// Vault doesn't answer with them. Never the number.
+    /// </summary>
+    public async Task<VaultCard?> GetCardAsync(string cardToken, CancellationToken ct)
+    {
+        try
+        {
+            using var response = await http.GetAsync($"api/vault/cards/{Uri.EscapeDataString(cardToken)}", ct);
+            return response.IsSuccessStatusCode ? await response.Content.ReadFromJsonAsync<VaultCard>(ct) : null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            return null;
         }
     }
 

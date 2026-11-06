@@ -121,6 +121,15 @@ namespace PayX.Payment.Repositories.Migrations
                         .HasColumnType("character varying(40)")
                         .HasColumnName("psp_authorization_id");
 
+                    b.Property<string>("RiskReasons")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("risk_reasons");
+
+                    b.Property<int?>("RiskScore")
+                        .HasColumnType("integer")
+                        .HasColumnName("risk_score");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -165,7 +174,9 @@ namespace PayX.Payment.Repositories.Migrations
 
                             t.HasCheckConstraint("ck_payments_psp_reference", "status NOT IN ('Authorized', 'Captured', 'Voided') OR psp_authorization_id IS NOT NULL");
 
-                            t.HasCheckConstraint("ck_payments_status", "status IN ('Created', 'RiskApproved', 'RiskBlocked', 'Authorized', 'Declined', 'Captured', 'Voided')");
+                            t.HasCheckConstraint("ck_payments_risk_score", "risk_score IS NULL OR risk_score BETWEEN 0 AND 100");
+
+                            t.HasCheckConstraint("ck_payments_status", "status IN ('Created', 'RiskApproved', 'RiskBlocked', 'Authorized', 'Declined', 'Captured', 'Voided', 'Challenged')");
                         });
                 });
 #pragma warning restore 612, 618

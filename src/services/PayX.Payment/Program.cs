@@ -25,7 +25,6 @@ builder.Services.AddScoped<PaymentCapture>();
 builder.Services.AddScoped<PaymentQueries>();
 builder.Services.AddScoped<IdempotencyService>();
 builder.Services.AddScoped<CurrentIdempotencyKey>();
-builder.Services.AddSingleton<IRiskCheck, AllowAllRiskCheck>();   // stand-in until Phase 5
 
 // Typed client for Vault. A plain timeout for now; retries and circuit
 // breaking (Polly) come in Phases 5-6.
@@ -35,6 +34,12 @@ builder.Services.AddHttpClient<VaultClient>(http =>
         ?? throw new InvalidOperationException("Missing configuration: Vault:BaseUrl"));
     http.Timeout = builder.Configuration.GetValue("Vault:Timeout", TimeSpan.FromSeconds(15));
 });
+
+// Risk (5.5): asked before every authorization. Its HttpClient's default
+// 100 s timeout still applies; a real timeout (Polly) is 5.6.
+builder.Services.AddHttpClient<IRiskCheck, RiskClient>(http =>
+    http.BaseAddress = new Uri(builder.Configuration["Risk:BaseUrl"]
+        ?? throw new InvalidOperationException("Missing configuration: Risk:BaseUrl")));
 
 // Direct to the PSP for capture (and later void, refund): no card data
 // involved, so no Vault hop (decision 32).

@@ -3,7 +3,7 @@ namespace PayX.Payment.Domain;
 /// <summary>
 /// Where a payment is in its life. Stored as text, so a row read in psql says
 /// "Authorized", not "4". More states arrive with the modules that need them:
-/// Challenged (5.3), Unknown (6.4), Settled (8), Refunded and Disputed (9).
+/// Unknown (6.4), Settled (8), Refunded and Disputed (9).
 /// </summary>
 public enum PaymentStatus
 {
@@ -14,6 +14,8 @@ public enum PaymentStatus
     Declined,       // issuer said no; nothing held
     Captured,       // money moved (all or part of the hold)
     Voided,         // hold released, nothing charged
+    Challenged,     // Risk said challenge (5.5): the customer must prove it's them; the PSP isn't called.
+                    // Final for now: completing a challenge (3-D Secure) isn't built.
 }
 
 /// <summary>
@@ -25,17 +27,18 @@ public enum PaymentStatus
 /// <code>
 /// Created ──► RiskApproved ──► Authorized ──► Captured
 ///    │             │               └────────► Voided
-///    └► RiskBlocked └► Declined
+///    ├► RiskBlocked └► Declined
+///    └► Challenged
 /// </code>
 /// </summary>
 public static class PaymentStateMachine
 {
     private static readonly Dictionary<PaymentStatus, PaymentStatus[]> Moves = new()
     {
-        [PaymentStatus.Created] = [PaymentStatus.RiskApproved, PaymentStatus.RiskBlocked],
+        [PaymentStatus.Created] = [PaymentStatus.RiskApproved, PaymentStatus.RiskBlocked, PaymentStatus.Challenged],
         [PaymentStatus.RiskApproved] = [PaymentStatus.Authorized, PaymentStatus.Declined],
         [PaymentStatus.Authorized] = [PaymentStatus.Captured, PaymentStatus.Voided],
-        // Not listed = final: RiskBlocked, Declined, Captured, Voided. Nothing
+        // Not listed = final: RiskBlocked, Declined, Captured, Voided, Challenged. Nothing
         // ever goes backwards (a captured payment is undone by a refund, a new
         // movement, in Phase 9; never by moving it back to Authorized).
     };

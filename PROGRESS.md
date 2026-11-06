@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 33 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 34 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -65,7 +65,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 9 / 9 | ✅ |
-| 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 4 / 7 | 🔄 |
+| 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 5 / 7 | 🔄 |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
 | 8 | [Settlement + Reconciliation](#phase-8-settlement--reconciliation) | reconciliation system | 0 / 4 | ⬜ |
@@ -135,7 +135,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 5.2 | Velocity counter in Redis (sliding window), per customer | real-time signals |
 | ✅ | 5.3 | Score → allow / challenge / block | decision vs detection |
 | ✅ | 5.4 | Vault derives card country from the BIN; returned with the token | card metadata without the PAN |
-| ⬜ | 5.5 | Payment calls Risk before the bank (stand-in replaced; Challenged state; score stored) | orchestration step |
+| ✅ | 5.5 | Payment calls Risk before the bank (stand-in replaced; Challenged state; score stored) | orchestration step |
 | ⬜ | 5.6 | Polly timeout on the Risk call | timeouts |
 | ⬜ | 5.7 | Circuit breaker + amount-threshold fallback | fallback |
 
@@ -665,7 +665,19 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Module 5.5 — Payment calls Risk before the bank.**
+**Module 5.6 — Polly timeout on the Risk call.**
+
+5.5 done (2026-11-06): `AllowAllRiskCheck` replaced by `RiskClient` (asks Vault
+`GET /api/vault/cards/{token}` for the country, then Risk); new final
+status `Challenged`; `risk_score` + `risk_reasons` columns (migration
+`RiskAssessment`), never in the customer's response. Risk with no answer
+→ payment stays Created, 502/504 to the caller, key released; retry
+resumes the same payment. Vault with no answer → country unknown (stricter,
+not looser). Payment tests 99/99. Verified through the Gateway: $50 US →
+Authorized (0); $1,500 GB → Authorized (35); $6,000 GB → RiskBlocked (80:
+velocity added 15 — same customer's 3rd payment); $50 XR → Challenged;
+$6,000 XR → RiskBlocked (100). Risk stopped → 502 risk_unreachable, payment
+Created; Risk back, same key → 201 Authorized, same payment id.
 
 2026-11-05: owner agreed to split the old 5.5 (call + timeout) into 5.5
 (the call), 5.6 (timeout) and 5.7 (circuit breaker + fallback). Phase 5 is

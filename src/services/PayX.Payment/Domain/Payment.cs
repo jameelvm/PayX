@@ -23,6 +23,12 @@ public sealed class Payment
     public string? DeclineCode { get; private set; }
     public long? CapturedAmountMinor { get; private set; }     // same currency as Amount; may be less
 
+    // Risk's assessment (5.5): why this payment was allowed, challenged or
+    // blocked, for analysts and disputes. Never shown to the customer: the
+    // reasons would teach a fraudster which rule to dodge.
+    public int? RiskScore { get; private set; }
+    public string? RiskReasons { get; private set; }           // rule codes, comma-separated
+
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
@@ -52,6 +58,15 @@ public sealed class Payment
     public void ApproveRisk() => MoveTo(PaymentStatus.RiskApproved);
 
     public void BlockRisk() => MoveTo(PaymentStatus.RiskBlocked);
+
+    public void ChallengeRisk() => MoveTo(PaymentStatus.Challenged);
+
+    /// <summary>Kept with the decision it led to, in the same save.</summary>
+    public void RecordRiskAssessment(int score, IEnumerable<string> reasons)
+    {
+        RiskScore = score;
+        RiskReasons = string.Join(',', reasons);
+    }
 
     public void Authorize(string pspAuthorizationId, string authorizationCode)
     {

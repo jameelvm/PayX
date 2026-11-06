@@ -75,7 +75,7 @@ public sealed class ResumptionTests
 
         var vault = new StubVault(vaultStatus, vaultBody);
         var current = new CurrentIdempotencyKey { Record = claim.Record, Resumed = claim.Outcome == ClaimOutcome.Resumed };
-        var result = await new PaymentAuthorization(db, new AllowAllRiskCheck(),
+        var result = await new PaymentAuthorization(db, FixedRisk.Allow(),
                 new VaultClient(new HttpClient(vault) { BaseAddress = new Uri("http://vault.test/") }), current)
             .AuthorizeAsync(Customer, Merchant, Amount, _key, default);
 

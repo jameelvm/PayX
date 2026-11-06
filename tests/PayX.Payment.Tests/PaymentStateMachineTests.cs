@@ -10,7 +10,7 @@ public sealed class PaymentStateMachineTests
     // the test can't agree with the code just by reading the same table.
     private static readonly HashSet<(PaymentStatus, PaymentStatus)> Legal =
     [
-        (Created, RiskApproved), (Created, RiskBlocked),
+        (Created, RiskApproved), (Created, RiskBlocked), (Created, Challenged),
         (RiskApproved, Authorized), (RiskApproved, Declined),
         (Authorized, Captured), (Authorized, Voided),
     ];
@@ -46,7 +46,7 @@ public sealed class PaymentStateMachineTests
 
     [Fact]
     public void Final_states_are_exactly_the_ones_with_no_way_out() =>
-        Assert.Equal([RiskBlocked, Declined, Captured, Voided],
+        Assert.Equal([RiskBlocked, Declined, Captured, Voided, Challenged],
             Enum.GetValues<PaymentStatus>().Where(PaymentStateMachine.IsFinal));
 
     [Fact]
@@ -85,7 +85,7 @@ public sealed class PaymentStateMachineTests
         PaymentStatus[] path = status switch
         {
             Created => [],
-            RiskApproved or RiskBlocked => [status],
+            RiskApproved or RiskBlocked or Challenged => [status],
             Authorized or Declined => [RiskApproved, status],
             Captured or Voided => [RiskApproved, Authorized, status],
             _ => throw new ArgumentOutOfRangeException(nameof(status)),
@@ -101,6 +101,7 @@ public sealed class PaymentStateMachineTests
         {
             case RiskApproved: payment.ApproveRisk(); break;
             case RiskBlocked: payment.BlockRisk(); break;
+            case Challenged: payment.ChallengeRisk(); break;
             case Authorized: payment.Authorize("auth_test", "A1B2C3"); break;
             case Declined: payment.Decline("card_declined"); break;
             case Captured: payment.Capture(payment.Amount); break;

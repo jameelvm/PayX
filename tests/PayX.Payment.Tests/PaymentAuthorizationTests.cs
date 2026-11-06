@@ -61,12 +61,38 @@ public sealed class PaymentAuthorizationTests
         Assert.Equal((PaymentStatus.Declined, "insufficient_funds"), (saved.Status, saved.DeclineCode));
     }
 
-    [Fact]
-    public async Task Blocked_by_risk_ends_RiskBlocked_and_never_reaches_vault()
+    [Theory]
+    [InlineData(RiskDecision.Block, PaymentStatus.RiskBlocked)]
+    [InlineData(RiskDecision.Challenge, PaymentStatus.Challenged)]
+    public async Task Blocked_or_challenged_by_risk_never_reaches_vault(RiskDecision decision, PaymentStatus expected)
     {
-        var result = await Authorize(risk: new BlockAll());
+        var result = await Authorize(risk: new FixedRisk(decision, 65, "amount_high", "cross_border"));
 
-        Assert.Equal(PaymentStatus.RiskBlocked, (await Reload(result.Payment.Id)).Status);
+        Assert.Null(result.Failure);
+        var saved = await Reload(result.Payment.Id);
+        Assert.Equal((expected, 65, "amount_high,cross_border"), (saved.Status, saved.RiskScore, saved.RiskReasons));
+        Assert.Equal(0, _vault.Calls);
+    }
+
+    [Fact]
+    public async Task Allowed_payment_keeps_its_risk_assessment()
+    {
+        _vault.Answer(HttpStatusCode.OK, """{"authorizationId":"auth_1","status":"authorized","authorizationCode":"A1B2C3"}""");
+
+        var result = await Authorize(risk: new FixedRisk(RiskDecision.Allow, 15, "card_country_unknown"));
+
+        var saved = await Reload(result.Payment.Id);
+        Assert.Equal((PaymentStatus.Authorized, 15, "card_country_unknown"), (saved.Status, saved.RiskScore, saved.RiskReasons));
+    }
+
+    [Fact]
+    public async Task Without_an_answer_from_risk_the_payment_stays_Created()
+    {
+        var result = await Authorize(risk: new FailingRisk(502, "risk_unreachable"));
+
+        Assert.Equal((502, "risk_unreachable"), (result.FailureStatus, result.Failure));
+        var saved = await Reload(result.Payment.Id);
+        Assert.Equal((PaymentStatus.Created, null), (saved.Status, saved.RiskScore));
         Assert.Equal(0, _vault.Calls);
     }
 
@@ -86,7 +112,7 @@ public sealed class PaymentAuthorizationTests
     private Task<AuthorizationResult> Authorize(IRiskCheck? risk = null)
     {
         var client = new VaultClient(new HttpClient(_vault) { BaseAddress = new Uri("http://vault.test/") });
-        return new PaymentAuthorization(NewContext(), risk ?? new AllowAllRiskCheck(), client, new CurrentIdempotencyKey())
+        return new PaymentAuthorization(NewContext(), risk ?? FixedRisk.Allow(), client, new CurrentIdempotencyKey())
             .AuthorizeAsync(Customer, Merchant, Amount, "tok_test", default);
     }
 
@@ -100,11 +126,6 @@ public sealed class PaymentAuthorizationTests
         .UseNpgsql("Host=localhost;Port=5434;Database=payx_payments;Username=payx_payments;Password=payx_payments_dev")
         .UseSnakeCaseNamingConvention()
         .Options);
-
-    private sealed class BlockAll : IRiskCheck
-    {
-        public Task<RiskDecision> CheckAsync(Domain.Payment payment, CancellationToken ct) => Task.FromResult(RiskDecision.Block);
-    }
 
     private sealed class StubVault : HttpMessageHandler
     {

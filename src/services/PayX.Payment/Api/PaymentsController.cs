@@ -87,8 +87,8 @@ public sealed class PaymentsController(PaymentAuthorization authorization, Payme
             return Problem(statusCode: result.FailureStatus is >= 500 ? result.FailureStatus : 422,
                 title: result.Failure, detail: $"payment {result.Payment.Id} is {result.Payment.Status}");
 
-        // 201 for every business outcome: Authorized, Declined and RiskBlocked
-        // are all a payment that now exists, with an answer. The status field
+        // 201 for every business outcome: Authorized, Declined, Challenged and
+        // RiskBlocked are all a payment that now exists, with an answer. The status field
         // says which; like the PSP, a decline is not an HTTP error. Location
         // points at checkPaymentStatus, and is relative on purpose: behind
         // the Gateway, an absolute URL built here named the internal instance
