@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 34 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 35 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -65,7 +65,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 9 / 9 | ✅ |
-| 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 5 / 7 | 🔄 |
+| 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 6 / 7 | 🔄 |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
 | 8 | [Settlement + Reconciliation](#phase-8-settlement--reconciliation) | reconciliation system | 0 / 4 | ⬜ |
@@ -136,7 +136,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 5.3 | Score → allow / challenge / block | decision vs detection |
 | ✅ | 5.4 | Vault derives card country from the BIN; returned with the token | card metadata without the PAN |
 | ✅ | 5.5 | Payment calls Risk before the bank (stand-in replaced; Challenged state; score stored) | orchestration step |
-| ⬜ | 5.6 | Polly timeout on the Risk call | timeouts |
+| ✅ | 5.6 | Polly timeout on the Risk call | timeouts |
 | ⬜ | 5.7 | Circuit breaker + amount-threshold fallback | fallback |
 
 ### Phase 6: Reliability
@@ -665,7 +665,17 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Module 5.6 — Polly timeout on the Risk call.**
+**Module 5.7 — circuit breaker + amount-threshold fallback.**
+
+5.6 done (2026-11-06): `Microsoft.Extensions.Http.Resilience` 10.8.0 in Payment;
+`AddRiskClient` (Services/RiskClientRegistration.cs) registers the Risk
+client with a resilience pipeline holding one timeout, `Risk:Timeout` = 2 s.
+`TimeoutRejectedException` → 504 risk_timeout, payment stays Created, key
+released. Payment tests 101/101 (2 new, through the real registration:
+5 s stub cut at 200 ms; fast answer unaffected). Verified live with
+`docker pause payx-risk`: 504 in 2.11 s (was up to 100 s); unpaused, same
+key → 201 Authorized, same payment id. Not bounded yet: the Vault country
+lookup before it (Vault's 15 s client timeout applies).
 
 5.5 done (2026-11-06): `AllowAllRiskCheck` replaced by `RiskClient` (asks Vault
 `GET /api/vault/cards/{token}` for the country, then Risk); new final

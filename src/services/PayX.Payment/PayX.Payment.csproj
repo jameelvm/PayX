@@ -21,6 +21,7 @@
          EF 10.0.4 while Design (private to this project) compiles against
          10.0.12, and PayX.Payment.Tests can't load the mismatched assembly. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.8.0" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
   </ItemGroup>
 

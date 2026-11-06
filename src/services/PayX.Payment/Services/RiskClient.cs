@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Polly.Timeout;
 
 namespace PayX.Payment.Services;
 
@@ -48,9 +49,14 @@ public sealed class RiskClient(HttpClient http, VaultClient vault) : IRiskCheck
             return new RiskCheckResult(new RiskAssessment(answer.Decision, answer.Score,
                 answer.Reasons.Select(r => r.Code).ToList()));
         }
-        // Not yet bounded: HttpClient's default 100 s applies. A Polly
-        // timeout is 5.6; what to do instead of failing is 5.7.
-        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        // The pipeline's timeout (5.6) gave up on Risk. No decision was
+        // made, so nothing is lost: the payment stays Created and a retry
+        // asks again. What to do instead of failing is 5.7.
+        catch (TimeoutRejectedException)
+        {
+            return new RiskCheckResult(null, 504, "risk_timeout");
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)   // HttpClient's own 100 s backstop
         {
             return new RiskCheckResult(null, 504, "risk_timeout");
         }
