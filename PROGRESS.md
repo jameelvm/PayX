@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 31 / 71 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 32 / 71 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -65,7 +65,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 9 / 9 | ✅ |
-| 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 2 / 6 | 🔄 |
+| 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 3 / 6 | 🔄 |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
 | 8 | [Settlement + Reconciliation](#phase-8-settlement--reconciliation) | reconciliation system | 0 / 4 | ⬜ |
@@ -133,7 +133,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 |---|---|---|---|
 | ✅ | 5.1 | Risk service: rule-based score (amount, card country) with reasons | risk scoring |
 | ✅ | 5.2 | Velocity counter in Redis (sliding window), per customer | real-time signals |
-| ⬜ | 5.3 | Score → allow / challenge / block | decision vs detection |
+| ✅ | 5.3 | Score → allow / challenge / block | decision vs detection |
 | ⬜ | 5.4 | Vault derives card country from the BIN; returned with the token | card metadata without the PAN |
 | ⬜ | 5.5 | Payment calls Risk with a Polly timeout | timeouts |
 | ⬜ | 5.6 | Circuit breaker + amount-threshold fallback | fallback |
@@ -664,7 +664,18 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Module 5.3 — score → allow / challenge / block.**
+**Module 5.4 — Vault derives card country from the BIN.**
+
+5.3 done (2026-11-05): `RiskPolicy.Decide(score, thresholds)`; `Risk:Decision`
+(ChallengeAt 40, BlockAt 80, inclusive), separate from `Risk:Rules`,
+validated at startup (contradictory thresholds → refuses to start). The
+response gains `decision`. `PayX.Risk.Tests` 36/36. Verified in the
+container across allow/challenge/block cases, and locally: ChallengeAt 90 /
+BlockAt 50 refuses to start; ChallengeAt 30 turns the same score 35 into
+Challenge with no rule change. Not yet: Payment's own `RiskDecision` has no
+Challenge (nor a Challenged state) — wired when Payment calls Risk (5.5).
+Open: the `payx-risk-decisions` DynamoDB table (bootstrapped in 1.3) is
+still unused — an audit record of each decision.
 
 5.2 done (2026-11-01): `risk:velocity:customer:{id}` sorted set, one Lua script (trim,
 `ZADD NX` by payment id, `PEXPIRE`, `ZCARD`) on Redis's own clock. The

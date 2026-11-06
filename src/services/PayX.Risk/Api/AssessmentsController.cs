@@ -17,7 +17,9 @@ public sealed record AssessmentRequest(
     [Required, RegularExpression("^[A-Z]{3}$")] string Currency,
     [RegularExpression("^[A-Z]{2}$")] string? CardCountry);
 
-public sealed record AssessmentResponse(string PaymentId, int Score, IReadOnlyList<RiskReason> Reasons);
+// The decision is what Payment acts on; score and reasons are why (for the
+// payment record, analysts and disputes).
+public sealed record AssessmentResponse(string PaymentId, RiskDecision Decision, int Score, IReadOnlyList<RiskReason> Reasons);
 
 /// <summary>
 /// "How risky is this payment?" Called by Payment before it asks for any
@@ -26,7 +28,8 @@ public sealed record AssessmentResponse(string PaymentId, int Score, IReadOnlyLi
 /// </summary>
 [ApiController]
 [Route("api/risk/assessments")]
-public sealed class AssessmentsController(IOptionsMonitor<RiskRulesSettings> rules, SlidingWindowCounter velocity)
+public sealed class AssessmentsController(IOptionsMonitor<RiskRulesSettings> rules,
+    IOptionsMonitor<DecisionThresholds> thresholds, SlidingWindowCounter velocity)
     : ControllerBase
 {
     // 200, not 201: nothing is stored but the velocity entry; the answer is
@@ -53,7 +56,10 @@ public sealed class AssessmentsController(IOptionsMonitor<RiskRulesSettings> rul
         var recent = await velocity.RecordAsync($"customer:{request.CustomerId}", request.PaymentId,
             settings.Velocity.Window);
 
+        // Detect, then decide (5.3): two steps, two sets of settings.
         var score = RiskRules.Score(new RiskInput(request.PaymentId, amount, request.CardCountry, recent), settings);
-        return Ok(new AssessmentResponse(request.PaymentId, score.Score, score.Reasons));
+        var decision = RiskPolicy.Decide(score.Score, thresholds.CurrentValue);
+
+        return Ok(new AssessmentResponse(request.PaymentId, decision, score.Score, score.Reasons));
     }
 }
