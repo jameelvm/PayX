@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Polly.CircuitBreaker;
 using Polly.Timeout;
 
 namespace PayX.Payment.Services;
@@ -51,7 +52,13 @@ public sealed class RiskClient(HttpClient http, VaultClient vault) : IRiskCheck
         }
         // The pipeline's timeout (5.6) gave up on Risk. No decision was
         // made, so nothing is lost: the payment stays Created and a retry
-        // asks again. What to do instead of failing is 5.7.
+        // asks again. FallbackRiskCheck (5.7) decides what happens instead.
+        // The circuit breaker (5.7) is open: Risk failed repeatedly just now,
+        // so it isn't even asked. Fails in microseconds instead of 2 s.
+        catch (BrokenCircuitException)
+        {
+            return new RiskCheckResult(null, 503, "risk_circuit_open");
+        }
         catch (TimeoutRejectedException)
         {
             return new RiskCheckResult(null, 504, "risk_timeout");

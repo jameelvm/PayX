@@ -3,7 +3,7 @@ using PayX.Payment.Services;
 namespace PayX.Payment.Tests;
 
 /// <summary>A Risk service that always answers the same; counts how often it was asked.</summary>
-public sealed class FixedRisk(RiskDecision decision, int score = 0, params string[] reasons) : IRiskCheck
+public sealed class FixedRisk(RiskDecision decision, int? score = 0, params string[] reasons) : IRiskCheck
 {
     public static FixedRisk Allow() => new(RiskDecision.Allow);
 

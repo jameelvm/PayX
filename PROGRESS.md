@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 35 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 36 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -65,7 +65,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 2 | [Identity](#phase-2-identity) | `registerUser`, `authenticateUser` | 4 / 4 | ✅ |
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 9 / 9 | ✅ |
-| 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 6 / 7 | 🔄 |
+| 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 7 / 7 | ✅ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
 | 8 | [Settlement + Reconciliation](#phase-8-settlement--reconciliation) | reconciliation system | 0 / 4 | ⬜ |
@@ -137,7 +137,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 5.4 | Vault derives card country from the BIN; returned with the token | card metadata without the PAN |
 | ✅ | 5.5 | Payment calls Risk before the bank (stand-in replaced; Challenged state; score stored) | orchestration step |
 | ✅ | 5.6 | Polly timeout on the Risk call | timeouts |
-| ⬜ | 5.7 | Circuit breaker + amount-threshold fallback | fallback |
+| ✅ | 5.7 | Circuit breaker + amount-threshold fallback | fallback |
 
 ### Phase 6: Reliability
 
@@ -665,7 +665,22 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Module 5.7 — circuit breaker + amount-threshold fallback.**
+**Phase 5 wrap-up (README, DESIGN, RUNNING, DEBUGGING), then Phase 6,
+Module 6.1 — outbox table, written in the payment's transaction.** First
+confirm decision 4 (one Kafka topic per aggregate), deferred to the start
+of Phase 6.
+
+5.7 done (2026-11-06): circuit breaker in the Risk pipeline, outside the
+timeout (FailureRatio 0.5, MinimumThroughput 5, SamplingDuration 30 s,
+BreakDuration 15 s) → open circuit = 503 risk_circuit_open without a call.
+`FallbackRiskCheck` wraps `RiskClient` (decision 12, accepted): Risk with no
+answer and amount below `Risk:Fallback:AllowBelowMinor` (≈ $100; per
+currency; exclusive) → Allow, score null, reason
+`risk_unavailable_fallback`; otherwise the failure stands (payment Created,
+retryable — not RiskBlocked: Risk never judged it). Payment tests 109/109.
+Live drill with `docker pause payx-risk`: four $500 payments 504 in ~2 s
+each, the 5th and 6th 503 in 0.03 s (circuit open), a $50 payment
+Authorized via the fallback in 0.08 s; unpaused + 16 s → normal again.
 
 5.6 done (2026-11-06): `Microsoft.Extensions.Http.Resilience` 10.8.0 in Payment;
 `AddRiskClient` (Services/RiskClientRegistration.cs) registers the Risk

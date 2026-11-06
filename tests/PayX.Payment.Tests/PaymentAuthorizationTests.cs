@@ -86,6 +86,18 @@ public sealed class PaymentAuthorizationTests
     }
 
     [Fact]
+    public async Task A_fallback_approval_is_recorded_without_a_score()
+    {
+        _vault.Answer(HttpStatusCode.OK, """{"authorizationId":"auth_1","status":"authorized","authorizationCode":"A1B2C3"}""");
+
+        var result = await Authorize(risk: new FixedRisk(RiskDecision.Allow, null, FallbackRiskCheck.FallbackReason));
+
+        var saved = await Reload(result.Payment.Id);
+        Assert.Equal((PaymentStatus.Authorized, (int?)null, "risk_unavailable_fallback"),
+            (saved.Status, saved.RiskScore, saved.RiskReasons));
+    }
+
+    [Fact]
     public async Task Without_an_answer_from_risk_the_payment_stays_Created()
     {
         var result = await Authorize(risk: new FailingRisk(502, "risk_unreachable"));

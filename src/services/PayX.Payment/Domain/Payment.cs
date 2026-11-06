@@ -62,7 +62,7 @@ public sealed class Payment
     public void ChallengeRisk() => MoveTo(PaymentStatus.Challenged);
 
     /// <summary>Kept with the decision it led to, in the same save.</summary>
-    public void RecordRiskAssessment(int score, IEnumerable<string> reasons)
+    public void RecordRiskAssessment(int? score, IEnumerable<string> reasons)
     {
         RiskScore = score;
         RiskReasons = string.Join(',', reasons);
