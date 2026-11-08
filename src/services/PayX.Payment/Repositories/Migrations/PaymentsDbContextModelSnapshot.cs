@@ -112,6 +112,10 @@ namespace PayX.Payment.Repositories.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("decline_code");
 
+                    b.Property<int>("EventSequence")
+                        .HasColumnType("integer")
+                        .HasColumnName("event_sequence");
+
                     b.Property<Guid>("MerchantId")
                         .HasColumnType("uuid")
                         .HasColumnName("merchant_id");
@@ -178,6 +182,64 @@ namespace PayX.Payment.Repositories.Migrations
 
                             t.HasCheckConstraint("ck_payments_status", "status IN ('Created', 'RiskApproved', 'RiskBlocked', 'Authorized', 'Declined', 'Captured', 'Voided', 'Challenged')");
                         });
+                });
+
+            modelBuilder.Entity("PayX.Payment.Repositories.OutboxMessage", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("event_id");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("event_type");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("key");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("payload");
+
+                    b.Property<DateTimeOffset?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("published_at");
+
+                    b.Property<string>("Topic")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("topic");
+
+                    b.HasKey("Id")
+                        .HasName("pk_outbox_messages");
+
+                    b.HasIndex("EventId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_outbox_messages_event_id");
+
+                    b.HasIndex("Id")
+                        .HasDatabaseName("ix_outbox_unpublished")
+                        .HasFilter("published_at IS NULL");
+
+                    b.ToTable("outbox_messages", (string)null);
                 });
 #pragma warning restore 612, 618
         }

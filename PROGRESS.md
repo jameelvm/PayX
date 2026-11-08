@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 36 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 37 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -66,7 +66,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 9 / 9 | ✅ |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 7 / 7 | ✅ |
-| 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 0 / 6 | ⬜ |
+| 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 1 / 6 | 🔄 |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
 | 8 | [Settlement + Reconciliation](#phase-8-settlement--reconciliation) | reconciliation system | 0 / 4 | ⬜ |
 | 9 | [Refunds + disputes](#phase-9-refunds--disputes) | dispute management | 0 / 3 | ⬜ |
@@ -143,7 +143,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 
 | | Module | What it builds | Concept |
 |---|---|---|---|
-| ⬜ | 6.1 | Outbox table, written in the payment's transaction | no dual writes |
+| ✅ | 6.1 | Outbox table, written in the payment's transaction | no dual writes |
 | ⬜ | 6.2 | Outbox relay → Kafka | never lose an event |
 | ⬜ | 6.3 | Retries with exponential backoff + jitter on PSP calls | retry strategy |
 | ⬜ | 6.4 | `UNKNOWN` state on timeout | timeout ambiguity |
@@ -665,9 +665,18 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 6, Module 6.1 — outbox table, written in the payment's
-transaction.** First confirm decision 4 (one Kafka topic per aggregate),
-deferred to the start of this phase.
+**Phase 6, Module 6.2 — outbox relay → Kafka.** (Owner asked for the whole
+phase in one go, 2026-11-08: commit per module, document at the end.)
+
+6.1 done (2026-11-08): decision 4 (one topic per aggregate) and 5 (outbox)
+accepted. `PaymentEvent` in `PayX.Contracts/Events` (eventId, type
+`payment.<status>`, per-payment sequence, amounts, PSP id). `Payment.MoveTo`
+records a `StatusChange`; `PaymentsDbContext.SaveChangesAsync` turns each
+into an `outbox_messages` row in the same transaction (migration `Outbox`:
+identity id, unique event_id, jsonb payload, partial index on unpublished).
+Payment tests 112/112 (3 new: events in order with sequence 1-3; a save
+refused by a constraint writes neither change nor event; a second save adds
+nothing). Live: pay + capture → 3 unpublished rows in order.
 
 **Phase 5 complete (2026-11-06): all seven modules committed; wrap-up done**
 — README Phase 5 teaching section, DESIGN (6 failure-mode rows, 6 Q&A

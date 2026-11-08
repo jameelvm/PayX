@@ -1,4 +1,7 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
+using PayX.Contracts.Events;
 using PayX.Payment.Domain;
 
 namespace PayX.Payment.Repositories;
@@ -8,6 +11,46 @@ public sealed class PaymentsDbContext(DbContextOptions<PaymentsDbContext> option
 {
     public DbSet<Domain.Payment> Payments => Set<Domain.Payment>();
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+
+    private static readonly JsonSerializerOptions EventJson = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() },
+    };
+
+    /// <summary>
+    /// The transactional outbox (6.1, DESIGN decision 5). Every status change
+    /// made on a tracked payment becomes an outbox row *in this same save*:
+    /// EF Core wraps one SaveChanges in one database transaction, so the new
+    /// status and the event announcing it commit together or not at all.
+    ///
+    /// The alternatives each lose or invent events on a crash:
+    /// publish-then-commit announces a change that may never be saved;
+    /// commit-then-publish loses the announcement if the process dies in
+    /// between. No code path can forget to write the event, because no code
+    /// path writes it: the context does, for every move.
+    /// </summary>
+    public override async Task<int> SaveChangesAsync(CancellationToken ct = default)
+    {
+        var changed = ChangeTracker.Entries<Domain.Payment>()
+            .Select(e => e.Entity).Where(p => p.PendingChanges.Count > 0).ToList();
+
+        foreach (var payment in changed)
+        foreach (var change in payment.PendingChanges)
+        {
+            var status = change.Status.ToString();
+            var evt = new PaymentEvent(Guid.CreateVersion7(), PaymentEvent.TypeFor(status), payment.Id,
+                change.Sequence, status, payment.MerchantId, payment.CustomerId, payment.Amount,
+                payment.CapturedAmountMinor, payment.PspAuthorizationId, change.At);
+            OutboxMessages.Add(new OutboxMessage(evt.EventId, Topics.Payments, payment.Id, evt.EventType,
+                JsonSerializer.Serialize(evt, EventJson), change.At));
+        }
+
+        var written = await base.SaveChangesAsync(ct);
+        foreach (var payment in changed)
+            payment.ClearPendingChanges();   // only once they're safely in the outbox
+        return written;
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -65,6 +108,23 @@ public sealed class PaymentsDbContext(DbContextOptions<PaymentsDbContext> option
             payment.Property(p => p.AuthorizationCode).HasMaxLength(6);
             payment.Property(p => p.DeclineCode).HasMaxLength(32);
             payment.Property(p => p.RiskReasons).HasMaxLength(200);
+            payment.Ignore(p => p.PendingChanges);
+        });
+
+        modelBuilder.Entity<OutboxMessage>(outbox =>
+        {
+            outbox.ToTable("outbox_messages");
+            outbox.HasKey(o => o.Id);
+            outbox.Property(o => o.Id).UseIdentityAlwaysColumn();
+            outbox.HasIndex(o => o.EventId).IsUnique();
+            outbox.Property(o => o.Topic).HasMaxLength(100);
+            outbox.Property(o => o.Key).HasMaxLength(40);
+            outbox.Property(o => o.EventType).HasMaxLength(50);
+            outbox.Property(o => o.Payload).HasColumnType("jsonb");
+            // What the relay asks for, over and over: "unpublished, oldest
+            // first". A partial index holds only those rows, so it stays tiny
+            // however many published rows pile up behind it.
+            outbox.HasIndex(o => o.Id).HasFilter("published_at IS NULL").HasDatabaseName("ix_outbox_unpublished");
         });
     }
 }

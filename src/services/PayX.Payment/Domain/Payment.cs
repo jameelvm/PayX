@@ -32,6 +32,15 @@ public sealed class Payment
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
+    /// <summary>How many status changes this payment has had: each one's event carries its number (6.1).</summary>
+    public int EventSequence { get; private set; }
+
+    // Status changes made since the last save, waiting to become outbox rows
+    // in that same save (6.1, PaymentsDbContext.SaveChangesAsync). Not mapped.
+    private readonly List<StatusChange> _pendingChanges = [];
+    public IReadOnlyList<StatusChange> PendingChanges => _pendingChanges;
+    public void ClearPendingChanges() => _pendingChanges.Clear();
+
     /// <summary>
     /// Postgres <c>xmin</c>, as on the PSP side (3.3): two workers that load
     /// the same Authorized payment and try different moves (capture vs void)
@@ -118,5 +127,11 @@ public sealed class Payment
         EnsureCanMoveTo(next);
         Status = next;
         UpdatedAt = DateTimeOffset.UtcNow;
+        // Every move is announced (doc ch.2, "Transaction completion"); the
+        // announcement is written with the move itself, never separately.
+        _pendingChanges.Add(new StatusChange(next, ++EventSequence, UpdatedAt));
     }
 }
+
+/// <summary>One status change, numbered within its payment, not yet saved.</summary>
+public sealed record StatusChange(PaymentStatus Status, int Sequence, DateTimeOffset At);
