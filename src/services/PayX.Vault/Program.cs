@@ -28,14 +28,14 @@ builder.Services.AddSingleton<AuthorizationAnswers>();
 builder.Services.AddSingleton<CardVault>();
 builder.Services.AddScoped<CardAuthorizer>();
 
-// Typed client for the PSP. A plain timeout for now; retries, backoff and a
-// circuit breaker (Polly) come in Phases 5-6.
+// Typed client for the PSP, with retries (6.3): every call carries the
+// caller's idempotency key, so repeating it can't authorize twice. Retried
+// here, at the hop closest to the PSP, and nowhere above (Payment doesn't
+// retry Vault): retries at every layer multiply (3 × 3 × 3 = 27 attempts).
 builder.Services.AddHttpClient<PspClient>(http =>
-{
-    http.BaseAddress = new Uri(builder.Configuration["Psp:BaseUrl"]
-        ?? throw new InvalidOperationException("Missing configuration: Psp:BaseUrl"));
-    http.Timeout = builder.Configuration.GetValue("Psp:Timeout", TimeSpan.FromSeconds(10));
-});
+        http.BaseAddress = new Uri(builder.Configuration["Psp:BaseUrl"]
+            ?? throw new InvalidOperationException("Missing configuration: Psp:BaseUrl")))
+    .AddKeyedRetries(builder.Configuration.GetSection("Psp:Resilience"));
 
 var app = builder.Build();
 

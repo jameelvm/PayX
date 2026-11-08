@@ -34,8 +34,8 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<OutboxPublisher>();
 builder.Services.AddHostedService<OutboxRelay>();
 
-// Typed client for Vault. A plain timeout for now; retries and circuit
-// breaking (Polly) come in Phases 5-6.
+// Typed client for Vault. A timeout, deliberately no retries: Vault retries
+// the PSP itself (6.3), and retrying at both layers would multiply attempts.
 builder.Services.AddHttpClient<VaultClient>(http =>
 {
     http.BaseAddress = new Uri(builder.Configuration["Vault:BaseUrl"]
@@ -47,13 +47,12 @@ builder.Services.AddHttpClient<VaultClient>(http =>
 builder.Services.AddRiskClient(builder.Configuration);
 
 // Direct to the PSP for capture (and later void, refund): no card data
-// involved, so no Vault hop (decision 32).
+// involved, so no Vault hop (decision 32). Retried (6.3): each call carries
+// the fixed key {paymentId}:capture, so a repeat replays, never re-captures.
 builder.Services.AddHttpClient<PspClient>(http =>
-{
-    http.BaseAddress = new Uri(builder.Configuration["Psp:BaseUrl"]
-        ?? throw new InvalidOperationException("Missing configuration: Psp:BaseUrl"));
-    http.Timeout = builder.Configuration.GetValue("Psp:Timeout", TimeSpan.FromSeconds(10));
-});
+        http.BaseAddress = new Uri(builder.Configuration["Psp:BaseUrl"]
+            ?? throw new InvalidOperationException("Missing configuration: Psp:BaseUrl")))
+    .AddKeyedRetries(builder.Configuration.GetSection("Psp:Resilience"));
 
 var app = builder.Build();
 

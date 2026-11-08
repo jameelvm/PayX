@@ -1,3 +1,4 @@
+using Polly.Timeout;
 using PayX.Vault.Repositories;
 
 namespace PayX.Vault.Services;
@@ -51,8 +52,10 @@ public sealed class CardAuthorizer(CardVault vault, PspClient psp, Authorization
         // No answer: the PSP may still have authorized. The CVC is kept, so a
         // retry with this key sends the identical request and the PSP replays
         // or performs it once. Reported as a timeout, never as "failed" (6.4).
-        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        catch (Exception ex) when (ex is TimeoutRejectedException
+            || (ex is TaskCanceledException && !ct.IsCancellationRequested))
         {
+            // The retry budget (6.3) ran out without a definitive answer.
             return new AuthorizeOutcome(null, 504, "psp_timeout");
         }
         catch (HttpRequestException)

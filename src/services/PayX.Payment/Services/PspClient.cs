@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using Polly.Timeout;
 
 namespace PayX.Payment.Services;
 
@@ -38,8 +39,10 @@ public sealed class PspClient(HttpClient http)
         }
         // No answer in time: the PSP may have captured. Not a failure, an
         // unknown, and safe to retry with the same key (it replays).
-        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        catch (Exception ex) when (ex is TimeoutRejectedException
+            || (ex is TaskCanceledException && !ct.IsCancellationRequested))
         {
+            // The retry budget (6.3) ran out without an answer.
             return new PspResult(null, 504, "psp_timeout");
         }
         catch (HttpRequestException)
