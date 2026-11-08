@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 41 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 42 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -66,7 +66,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 9 / 9 | ✅ |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 7 / 7 | ✅ |
-| 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 5 / 6 | 🔄 |
+| 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 6 / 6 | ✅ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
 | 8 | [Settlement + Reconciliation](#phase-8-settlement--reconciliation) | reconciliation system | 0 / 4 | ⬜ |
 | 9 | [Refunds + disputes](#phase-9-refunds--disputes) | dispute management | 0 / 3 | ⬜ |
@@ -148,7 +148,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 6.3 | Retries with exponential backoff + jitter on PSP calls | retry strategy |
 | ✅ | 6.4 | `UNKNOWN` state on timeout | timeout ambiguity |
 | ✅ | 6.5 | Resolver job | resolving the unknown |
-| ⬜ | 6.6 | Poison messages → dead-letter topic | unblocking a partition |
+| ✅ | 6.6 | Poison messages → dead-letter topic | unblocking a partition |
 
 ### Phase 7: Ledger + wallets
 
@@ -665,7 +665,9 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 6, Module 6.6 — poison messages → dead-letter topic.** (Owner asked for the whole
+**Phase 6 wrap-up (README, DESIGN, RUNNING, DEBUGGING, docs/RELIABILITY.md),
+then Phase 7, Module 7.1 — accounts + journal + postings.** First confirm
+decision 10 (wallet balances inside Ledger), deferred to the start of Phase 7. (Owner asked for the whole
 phase in one go, 2026-11-08: commit per module, document at the end.)
 
 6.1 done (2026-11-08): decision 4 (one topic per aggregate) and 5 (outbox)
@@ -727,6 +729,22 @@ container's relay). Live, nobody retrying: PSP stopped → 502 → Failed after
 60 s; PSP frozen → 202 Unknown → Failed (the frozen PSP never saw the
 request: verified, it holds nothing); simulated lost answer (the PSP holds
 the authorization) → Authorized with the PSP's auth id.
+
+6.6 done (2026-11-08): `ServiceDefaults/Kafka/DeadLetteringConsumer<THandler>`
+(BackgroundService on its own thread; manual commit after handling →
+at least once; malformed (JsonException / PoisonMessageException) → DLQ at
+once; other failures retried in place with doubling waits up to
+MaxAttempts (5), then DLQ; the DLQ copy keeps key, value and headers plus
+dlq-reason (malformed | retries_exhausted), dlq-exception, dlq-error,
+dlq-attempts, dlq-source topic/partition@offset, dlq-consumer-group,
+dlq-failed-at, and is awaited before the commit). `AddDeadLetteringConsumer`
+registration for Phase 7's Ledger. Topic `payx.payments.dlq` (1 partition,
+30 days) in create-topics.sh (an edit had turned it CRLF and broke
+kafka-init: fixed). Payment tests 171/171 (3 new, real Kafka, own topics per
+test: good/poison/good → both good handled, poison in DLQ with headers,
+committed offset 3; transient ×2 → handled, no DLQ; never clears → DLQ
+after 3 attempts with original headers). No production consumer yet: the
+Ledger (7.3) is the first.
 
 **Phase 5 complete (2026-11-06): all seven modules committed; wrap-up done**
 — README Phase 5 teaching section, DESIGN (6 failure-mode rows, 6 Q&A

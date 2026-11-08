@@ -35,5 +35,16 @@ $TOPICS --bootstrap-server "$BOOTSTRAP" --create --if-not-exists \
   --replication-factor 1 \
   --config retention.ms=604800000   # 7 days: long enough to replay into a rebuilt Ledger
 
+# Dead-letter topic (Module 6.6): payment events a consumer could not process,
+# copied here with why and where they failed, so the consumer can move on
+# instead of blocking its partition. Kept 30 days: long enough to notice,
+# fix and replay. One partition: nothing here is processed in bulk.
+$TOPICS --bootstrap-server "$BOOTSTRAP" --create --if-not-exists \
+  --topic payx.payments.dlq \
+  --partitions 1 \
+  --replication-factor 1 \
+  --config retention.ms=2592000000
+
 $TOPICS --bootstrap-server "$BOOTSTRAP" --describe --topic payx.payments
+$TOPICS --bootstrap-server "$BOOTSTRAP" --describe --topic payx.payments.dlq
 echo "[payx] kafka topics ready"

@@ -30,6 +30,33 @@ public static class KafkaExtensions
         return builder;
     }
 
+    /// <summary>
+    /// A consumer of <paramref name="topic"/> in group <paramref name="groupId"/>
+    /// whose messages go to <typeparamref name="THandler"/>; messages it can't
+    /// handle go to <paramref name="deadLetterTopic"/> (6.6). Registers the
+    /// shared producer too (the dead-letter copy is produced with it).
+    /// </summary>
+    public static WebApplicationBuilder AddDeadLetteringConsumer<THandler>(this WebApplicationBuilder builder,
+        string topic, string groupId, string deadLetterTopic)
+        where THandler : class, Kafka.IMessageHandler
+    {
+        if (builder.Services.All(s => s.ServiceType != typeof(IProducer<string, string>)))
+            builder.AddKafkaProducer();
+
+        builder.Services.AddScoped<THandler>();
+        builder.Services.AddSingleton(new Kafka.ConsumerSettings
+        {
+            Topic = topic,
+            GroupId = groupId,
+            DeadLetterTopic = deadLetterTopic,
+            BootstrapServers = BootstrapServers(builder.Configuration),
+            MaxAttempts = builder.Configuration.GetValue("Kafka:Consumer:MaxAttempts", 5),
+            RetryDelay = builder.Configuration.GetValue("Kafka:Consumer:RetryDelay", TimeSpan.FromMilliseconds(200)),
+        });
+        builder.Services.AddHostedService<Kafka.DeadLetteringConsumer<THandler>>();
+        return builder;
+    }
+
     public static ProducerConfig ProducerConfig(IConfiguration configuration) => new()
     {
         BootstrapServers = BootstrapServers(configuration),
