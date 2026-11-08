@@ -99,10 +99,13 @@ public sealed class OutboxRelayTests
 
     private static async Task PublishUntilDone(string paymentId)
     {
-        for (var pass = 0; pass < 50 && (await PublishedAt(paymentId)).Any(p => p is null); pass++)
+        // Another relay (the Payment container's) may hold the lock for a
+        // while; give it up to ~20 s, then either relay will have done it.
+        for (var pass = 0; pass < 100 && (await PublishedAt(paymentId)).Any(p => p is null); pass++)
         {
             await NewPublisher(out var db).PublishBatchAsync(1000, default);
             await db.DisposeAsync();
+            await Task.Delay(200);
         }
         Assert.All(await PublishedAt(paymentId), p => Assert.NotNull(p));
     }

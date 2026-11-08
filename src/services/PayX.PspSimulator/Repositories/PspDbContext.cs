@@ -58,6 +58,8 @@ public sealed class PspDbContext(DbContextOptions<PspDbContext> options) : DbCon
             auth.Property(a => a.Status).HasConversion<string>().HasMaxLength(16);
             auth.Property(a => a.AuthorizationCode).HasMaxLength(6);
             auth.Property(a => a.DeclineCode).HasMaxLength(32);
+            auth.Property(a => a.Reference).HasMaxLength(64);
+            auth.HasIndex(a => a.Reference);
 
             auth.HasOne<CardAccount>().WithMany().HasForeignKey(a => a.CardFingerprint);
             // "Sum this card's live holds" runs on every authorization.

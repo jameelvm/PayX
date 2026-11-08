@@ -34,6 +34,11 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<OutboxPublisher>();
 builder.Services.AddHostedService<OutboxRelay>();
 
+// Resolver (6.5): payments stuck without the bank's answer are looked up at
+// the PSP and given its verdict.
+builder.Services.AddScoped<StuckPaymentResolver>();
+builder.Services.AddHostedService<StuckPaymentResolverJob>();
+
 // Typed client for Vault. A timeout, deliberately no retries: Vault retries
 // the PSP itself (6.3), and retrying at both layers would multiply attempts.
 builder.Services.AddHttpClient<VaultClient>(http =>

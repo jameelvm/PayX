@@ -8,6 +8,13 @@ namespace PayX.Payment.Services;
 /// <param name="Error">The PSP's refusal code (its ProblemDetails title), or ours for a timeout.</param>
 public sealed record PspResult(string? Status, int StatusCode, string? Error);
 
+/// <summary>What the PSP knows about one of our payments, by our reference (6.5).</summary>
+/// <param name="Reachable">False when the PSP couldn't be asked: no conclusion may be drawn.</param>
+/// <param name="Authorization">Null when the PSP answered and has no record.</param>
+public sealed record PspLookup(bool Reachable, PspAuthorizationView? Authorization);
+
+public sealed record PspAuthorizationView(string AuthorizationId, string Status, string? AuthorizationCode, string? DeclineCode);
+
 /// <summary>
 /// Payment's direct line to the PSP, for operations on an existing
 /// authorization: capture now, void and refund later. These carry the PSP's
@@ -20,6 +27,29 @@ public sealed class PspClient(HttpClient http)
         CancellationToken ct) =>
         PostAsync($"api/psp/authorizations/{Uri.EscapeDataString(pspAuthorizationId)}/capture",
             new { amount = amountMinor }, idempotencyKey, ct);
+
+    /// <summary>
+    /// "What happened to payment X?" (6.5), by the reference sent with the
+    /// authorization. A plain read: safe to repeat, no key needed.
+    /// </summary>
+    public async Task<PspLookup> FindByReferenceAsync(string reference, CancellationToken ct)
+    {
+        try
+        {
+            using var response = await http.GetAsync(
+                $"api/psp/authorizations?reference={Uri.EscapeDataString(reference)}", ct);
+            if (!response.IsSuccessStatusCode)
+                return new PspLookup(false, null);   // a 5xx is not "no record"
+            var found = await response.Content.ReadFromJsonAsync<List<PspAuthorizationView>>(ct);
+            // One idempotency key per payment means at most one authorization.
+            return new PspLookup(true, found?.LastOrDefault());
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TimeoutRejectedException
+            || (ex is TaskCanceledException && !ct.IsCancellationRequested))
+        {
+            return new PspLookup(false, null);
+        }
+    }
 
     private async Task<PspResult> PostAsync(string path, object body, string idempotencyKey, CancellationToken ct)
     {

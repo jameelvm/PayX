@@ -15,7 +15,7 @@ public sealed class Authorizer(PspDbContext db, IConfiguration config)
     private readonly byte[] _fingerprintKey = Encoding.UTF8.GetBytes(config["Psp:FingerprintKey"]!);
 
     public async Task<Authorization> AuthorizeAsync(string number, string brand, int expMonth, int expYear,
-        long amountMinor, string currency, string merchantId, CancellationToken ct)
+        long amountMinor, string currency, string merchantId, string? reference, CancellationToken ct)
     {
         var fingerprint = Convert.ToHexString(HMACSHA256.HashData(_fingerprintKey, Encoding.UTF8.GetBytes(number)));
 
@@ -60,7 +60,8 @@ public sealed class Authorizer(PspDbContext db, IConfiguration config)
 
         var authorization = new Authorization(fingerprint, number[^4..], brand, merchantId, amountMinor, currency,
             declineCode,
-            authorizationCode: declineCode is null ? RandomNumberGenerator.GetString("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6) : null);
+            authorizationCode: declineCode is null ? RandomNumberGenerator.GetString("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6) : null,
+            reference: reference);
 
         db.Authorizations.Add(authorization);
         await db.SaveChangesAsync(ct);

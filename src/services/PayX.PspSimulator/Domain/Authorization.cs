@@ -26,6 +26,9 @@ public sealed class Authorization
     public string? DeclineCode { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
+    /// <summary>The merchant's own payment id, if it sent one (6.5).</summary>
+    public string? Reference { get; private set; }
+
     /// <summary>How much was actually charged. May be less than authorized.</summary>
     public long? CapturedAmountMinor { get; private set; }
 
@@ -72,7 +75,7 @@ public sealed class Authorization
     }
 
     public Authorization(string cardFingerprint, string last4, string brand, string merchantId,
-        long amountMinor, string currency, string? declineCode, string? authorizationCode)
+        long amountMinor, string currency, string? declineCode, string? authorizationCode, string? reference = null)
     {
         Id = $"auth_{Guid.CreateVersion7():N}";
         CardFingerprint = cardFingerprint;
@@ -84,6 +87,7 @@ public sealed class Authorization
         Status = declineCode is null ? AuthorizationStatus.Authorized : AuthorizationStatus.Declined;
         DeclineCode = declineCode;
         AuthorizationCode = authorizationCode;
+        Reference = reference;
         CreatedAt = DateTimeOffset.UtcNow;
     }
 

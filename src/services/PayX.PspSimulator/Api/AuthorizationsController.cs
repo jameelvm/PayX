@@ -14,7 +14,11 @@ public sealed record AuthorizeRequest(
     [Range(1, long.MaxValue)] long Amount,
     [Required, RegularExpression("^[A-Z]{3}$")] string Currency,
     [Required] CardDetails Card,
-    [Required] string MerchantId);
+    [Required] string MerchantId,
+    // The merchant's own id for this payment (Stripe: metadata / description,
+    // Adyen: merchantReference). Lets the merchant ask "what happened to my
+    // payment X?" even when it never received the authorization id (6.5).
+    [StringLength(64)] string? Reference = null);
 
 public sealed record CardDetails(
     [Required] string Number,
@@ -47,6 +51,15 @@ public sealed class AuthorizationsController(Authorizer authorizer, Authorizatio
             ? Ok(AuthorizationResponse.From(auth))
             : Problem(statusCode: 404, title: "authorization_not_found");
 
+    // Lookup by the merchant's reference (6.5): the answer to "the call timed
+    // out, what happened?" when the caller never got an authorization id.
+    // An empty list means the PSP never processed that payment.
+    [HttpGet]
+    public async Task<IActionResult> FindByReference([FromQuery, Required] string reference, CancellationToken ct) =>
+        Ok(await db.Authorizations.AsNoTracking()
+            .Where(a => a.Reference == reference).OrderBy(a => a.CreatedAt)
+            .Select(a => AuthorizationResponse.From(a)).ToListAsync(ct));
+
     [HttpPost, Idempotent]
     public async Task<IActionResult> Authorize(AuthorizeRequest request, CancellationToken ct)
     {
@@ -61,7 +74,7 @@ public sealed class AuthorizationsController(Authorizer authorizer, Authorizatio
         // 2. Issuer bank: does this cardholder's account allow the hold?
         //    (Approved → a hold is recorded against the card's credit.)
         var auth = await authorizer.AuthorizeAsync(number, brand.ToString(), request.Card.ExpMonth,
-            request.Card.ExpYear, request.Amount, request.Currency, request.MerchantId, ct);
+            request.Card.ExpYear, request.Amount, request.Currency, request.MerchantId, request.Reference, ct);
 
         // A decline is a 200, not an error: the request was understood and
         // processed, and the answer was "no". The difference matters to the

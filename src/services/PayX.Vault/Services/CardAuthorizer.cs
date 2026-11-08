@@ -21,7 +21,7 @@ public sealed record AuthorizeOutcome(PspAnswer? Answer, int ErrorStatus = 0, st
 public sealed class CardAuthorizer(CardVault vault, PspClient psp, AuthorizationAnswers answers)
 {
     public async Task<AuthorizeOutcome> AuthorizeAsync(string token, long amount, string currency, string merchantId,
-        string idempotencyKey, CancellationToken ct)
+        string idempotencyKey, CancellationToken ct, string? reference = null)
     {
         if (await vault.FindAsync(token, ct) is not { } card)
             return new AuthorizeOutcome(null, 404, "card_not_found");
@@ -42,6 +42,7 @@ public sealed class CardAuthorizer(CardVault vault, PspClient psp, Authorization
             currency,
             card = new { number, expMonth = card.ExpMonth, expYear = card.ExpYear, cvc },
             merchantId,
+            reference,
         };
 
         PspAnswer answer;

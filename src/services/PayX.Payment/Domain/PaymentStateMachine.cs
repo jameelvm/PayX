@@ -18,6 +18,8 @@ public enum PaymentStatus
                     // Final for now: completing a challenge (3-D Secure) isn't built.
     Unknown,        // asked the bank, no answer in time (6.4): it may or may not have authorized.
                     // Only the PSP knows; a retry or the resolver (6.5) finds out.
+    Failed,         // the resolver (6.5) asked the PSP: it has no record of this payment, so
+                    // nothing is held. Final: a later retry returns it, never asks the bank again.
 }
 
 /// <summary>
@@ -30,7 +32,7 @@ public enum PaymentStatus
 /// Created ──► RiskApproved ──► Authorized ──► Captured
 ///    │             │  ▲            └────────► Voided
 ///    │             │  │
-///    │             ├► Unknown ──► Declined
+///    │             ├► Unknown ──► Declined / Failed (6.5)
 ///    ├► RiskBlocked └► Declined
 ///    └► Challenged
 /// </code>
@@ -40,11 +42,12 @@ public static class PaymentStateMachine
     private static readonly Dictionary<PaymentStatus, PaymentStatus[]> Moves = new()
     {
         [PaymentStatus.Created] = [PaymentStatus.RiskApproved, PaymentStatus.RiskBlocked, PaymentStatus.Challenged],
-        [PaymentStatus.RiskApproved] = [PaymentStatus.Authorized, PaymentStatus.Declined, PaymentStatus.Unknown],
-        // Unknown is resolved by what the PSP says happened, never by a guess (6.4).
-        [PaymentStatus.Unknown] = [PaymentStatus.Authorized, PaymentStatus.Declined],
+        [PaymentStatus.RiskApproved] = [PaymentStatus.Authorized, PaymentStatus.Declined, PaymentStatus.Unknown,
+            PaymentStatus.Failed],
+        // Unknown is resolved by what the PSP says happened, never by a guess (6.4-6.5).
+        [PaymentStatus.Unknown] = [PaymentStatus.Authorized, PaymentStatus.Declined, PaymentStatus.Failed],
         [PaymentStatus.Authorized] = [PaymentStatus.Captured, PaymentStatus.Voided],
-        // Not listed = final: RiskBlocked, Declined, Captured, Voided, Challenged. Nothing
+        // Not listed = final: RiskBlocked, Declined, Captured, Voided, Challenged, Failed. Nothing
         // ever goes backwards (a captured payment is undone by a refund, a new
         // movement, in Phase 9; never by moving it back to Authorized).
     };

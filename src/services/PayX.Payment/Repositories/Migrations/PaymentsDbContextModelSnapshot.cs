@@ -180,7 +180,7 @@ namespace PayX.Payment.Repositories.Migrations
 
                             t.HasCheckConstraint("ck_payments_risk_score", "risk_score IS NULL OR risk_score BETWEEN 0 AND 100");
 
-                            t.HasCheckConstraint("ck_payments_status", "status IN ('Created', 'RiskApproved', 'RiskBlocked', 'Authorized', 'Declined', 'Captured', 'Voided', 'Challenged', 'Unknown')");
+                            t.HasCheckConstraint("ck_payments_status", "status IN ('Created', 'RiskApproved', 'RiskBlocked', 'Authorized', 'Declined', 'Captured', 'Voided', 'Challenged', 'Unknown', 'Failed')");
                         });
                 });
 

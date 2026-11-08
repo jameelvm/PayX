@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 40 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 41 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -66,7 +66,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 9 / 9 | ✅ |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 7 / 7 | ✅ |
-| 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 4 / 6 | 🔄 |
+| 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 5 / 6 | 🔄 |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
 | 8 | [Settlement + Reconciliation](#phase-8-settlement--reconciliation) | reconciliation system | 0 / 4 | ⬜ |
 | 9 | [Refunds + disputes](#phase-9-refunds--disputes) | dispute management | 0 / 3 | ⬜ |
@@ -147,7 +147,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | ✅ | 6.2 | Outbox relay → Kafka | never lose an event |
 | ✅ | 6.3 | Retries with exponential backoff + jitter on PSP calls | retry strategy |
 | ✅ | 6.4 | `UNKNOWN` state on timeout | timeout ambiguity |
-| ⬜ | 6.5 | Resolver job | resolving the unknown |
+| ✅ | 6.5 | Resolver job | resolving the unknown |
 | ⬜ | 6.6 | Poison messages → dead-letter topic | unblocking a partition |
 
 ### Phase 7: Ledger + wallets
@@ -665,7 +665,7 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 6, Module 6.5 — resolver job.** (Owner asked for the whole
+**Phase 6, Module 6.6 — poison messages → dead-letter topic.** (Owner asked for the whole
 phase in one go, 2026-11-08: commit per module, document at the end.)
 
 6.1 done (2026-11-08): decision 4 (one topic per aggregate) and 5 (outbox)
@@ -712,6 +712,21 @@ container's relay — fixed by taking the lock before creating the events).
 Live: PSP paused 12 s → 202 Unknown; unpaused, same key → 201 Authorized,
 same payment, then replayed; events riskapproved → unknown → authorized;
 PSP holds one key.
+
+6.5 done (2026-11-08): the payment id travels as `reference` (Payment →
+Vault → PSP; PSP column + index, migration `AuthorizationReference`;
+`GET /api/psp/authorizations?reference=`). New final status `Failed`
+(RiskApproved/Unknown → Failed: "the PSP has no record, nothing held";
+migration `FailedStatus`). `Services/StuckPaymentResolver` (find payments
+at Unknown/RiskApproved untouched for > grace; ask the PSP by reference:
+authorized → Authorized, declined → Declined, none → Failed, PSP
+unreachable/5xx → no conclusion) run by `Jobs/StuckPaymentResolverJob`
+(every 15 s, grace 60 s, 50 per pass; xmin guards races with a retry).
+Payment tests 168/168 (+8; a relay test loop needed pacing against the
+container's relay). Live, nobody retrying: PSP stopped → 502 → Failed after
+60 s; PSP frozen → 202 Unknown → Failed (the frozen PSP never saw the
+request: verified, it holds nothing); simulated lost answer (the PSP holds
+the authorization) → Authorized with the PSP's auth id.
 
 **Phase 5 complete (2026-11-06): all seven modules committed; wrap-up done**
 — README Phase 5 teaching section, DESIGN (6 failure-mode rows, 6 Q&A

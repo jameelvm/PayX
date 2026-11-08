@@ -65,7 +65,7 @@ public sealed class PaymentAuthorization(PaymentsDbContext db, IRiskCheck risk, 
         if (payment.Status is PaymentStatus.RiskApproved or PaymentStatus.Unknown)
         {
             var result = await vault.AuthorizeAsync(payment.CardToken, payment.Amount, payment.MerchantId,
-                $"{payment.Id}:authorize", ct);
+                $"{payment.Id}:authorize", ct, reference: payment.Id);
             if (result.Authorization is not { } answer)
             {
                 // A timeout (Vault's psp_timeout, or ours waiting for Vault)

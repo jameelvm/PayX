@@ -92,6 +92,9 @@ public sealed class Payment
     /// </summary>
     public void MarkUnknown() => MoveTo(PaymentStatus.Unknown);
 
+    /// <summary>The PSP has no record of this payment (6.5): nothing was authorized, nothing is held.</summary>
+    public void Fail() => MoveTo(PaymentStatus.Failed);
+
     public void Decline(string declineCode)
     {
         MoveTo(PaymentStatus.Declined);

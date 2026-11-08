@@ -12,7 +12,7 @@ public sealed class PaymentStateMachineTests
     [
         (Created, RiskApproved), (Created, RiskBlocked), (Created, Challenged),
         (RiskApproved, Authorized), (RiskApproved, Declined), (RiskApproved, Unknown),
-        (Unknown, Authorized), (Unknown, Declined),
+        (Unknown, Authorized), (Unknown, Declined), (RiskApproved, Failed), (Unknown, Failed),
         (Authorized, Captured), (Authorized, Voided),
     ];
 
@@ -47,7 +47,7 @@ public sealed class PaymentStateMachineTests
 
     [Fact]
     public void Final_states_are_exactly_the_ones_with_no_way_out() =>
-        Assert.Equal([RiskBlocked, Declined, Captured, Voided, Challenged],
+        Assert.Equal([RiskBlocked, Declined, Captured, Voided, Challenged, Failed],
             Enum.GetValues<PaymentStatus>().Where(PaymentStateMachine.IsFinal));
 
     [Fact]
@@ -88,6 +88,7 @@ public sealed class PaymentStateMachineTests
             Created => [],
             RiskApproved or RiskBlocked or Challenged => [status],
             Unknown => [RiskApproved, Unknown],
+            Failed => [RiskApproved, Failed],
             Authorized or Declined => [RiskApproved, status],
             Captured or Voided => [RiskApproved, Authorized, status],
             _ => throw new ArgumentOutOfRangeException(nameof(status)),
@@ -105,6 +106,7 @@ public sealed class PaymentStateMachineTests
             case RiskBlocked: payment.BlockRisk(); break;
             case Challenged: payment.ChallengeRisk(); break;
             case Unknown: payment.MarkUnknown(); break;
+            case Failed: payment.Fail(); break;
             case Authorized: payment.Authorize("auth_test", "A1B2C3"); break;
             case Declined: payment.Decline("card_declined"); break;
             case Captured: payment.Capture(payment.Amount); break;

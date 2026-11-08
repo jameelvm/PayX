@@ -85,6 +85,11 @@ namespace PayX.PspSimulator.Repositories.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("merchant_id");
 
+                    b.Property<string>("Reference")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("reference");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -99,6 +104,9 @@ namespace PayX.PspSimulator.Repositories.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_authorizations");
+
+                    b.HasIndex("Reference")
+                        .HasDatabaseName("ix_authorizations_reference");
 
                     b.HasIndex("CardFingerprint", "Status")
                         .HasDatabaseName("ix_authorizations_card_fingerprint_status");

@@ -20,12 +20,14 @@ public sealed record VaultAuthorizeResult(PspAuthorization? Authorization, int S
 public sealed class VaultClient(HttpClient http)
 {
     public async Task<VaultAuthorizeResult> AuthorizeAsync(string cardToken, Money amount, Guid merchantId,
-        string idempotencyKey, CancellationToken ct)
+        string idempotencyKey, CancellationToken ct, string? reference = null)
     {
         using var message = new HttpRequestMessage(HttpMethod.Post,
             $"api/vault/cards/{Uri.EscapeDataString(cardToken)}/authorizations")
         {
-            Content = JsonContent.Create(new { amount = amount.AmountMinor, currency = amount.Currency, merchantId }),
+            // reference = the payment id: the PSP keeps it, so the resolver can
+            // ask "what happened to this payment?" (6.5).
+            Content = JsonContent.Create(new { amount = amount.AmountMinor, currency = amount.Currency, merchantId, reference }),
         };
         message.Headers.Add("Idempotency-Key", idempotencyKey);
 

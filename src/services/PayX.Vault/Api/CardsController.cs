@@ -21,7 +21,10 @@ public sealed record TokenizeRequest(
 public sealed record AuthorizeRequest(
     [Range(1, long.MaxValue)] long Amount,
     [Required, RegularExpression("^[A-Z]{3}$")] string Currency,
-    [Required] string MerchantId);
+    [Required] string MerchantId,
+    // The caller's payment id, passed through to the PSP so the payment can
+    // be looked up there by it (6.5).
+    [StringLength(64)] string? Reference = null);
 
 // What every other service gets instead of a card number. Country: for
 // Risk (via Payment, 5.5); null when the BIN is unknown.
@@ -42,7 +45,7 @@ public sealed class CardsController(CardVault vault, CardAuthorizer authorizer) 
         [FromHeader(Name = "Idempotency-Key"), Required, StringLength(255)] string idempotencyKey, CancellationToken ct)
     {
         var outcome = await authorizer.AuthorizeAsync(token, request.Amount, request.Currency, request.MerchantId,
-            idempotencyKey, ct);
+            idempotencyKey, ct, request.Reference);
         if (outcome.Answer is not { } answer)
             return Problem(statusCode: outcome.ErrorStatus, title: outcome.Error);
 
