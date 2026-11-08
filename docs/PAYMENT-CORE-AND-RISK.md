@@ -13,6 +13,10 @@ and stays safe to retry at every step.
 [All scenarios](#all-scenarios) · [Configuration](#configuration-reference) ·
 [Known gaps](#known-gaps-and-what-comes-next)
 
+**Since Phase 6:** two more statuses, `Unknown` (the bank didn't answer in
+time; answered 202) and `Failed` (the PSP has no record), plus the outbox,
+retries, resolver and dead-letter topic: see [`RELIABILITY.md`](RELIABILITY.md).
+
 Related: every Payment Core scenario with its requests in
 [`PAYMENT-CORE.md`](PAYMENT-CORE.md); module-by-module teaching notes in
 [`../README.md`](../README.md); decisions and failure modes in

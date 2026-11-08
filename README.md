@@ -796,3 +796,117 @@ payment. Still open: the challenge itself (3-D Secure) isn't built, Risk
 doesn't keep an audit record of decisions, and velocity is per customer,
 not per card. Phase 6 makes payments announce themselves (outbox, Kafka)
 and adds retries and the `UNKNOWN` state.
+
+## Phase 6 — Reliability
+
+**What the phase delivers:** correctness when things fail after the customer
+clicked Pay. Every payment status change is announced on Kafka, exactly as
+it happened and never lost (outbox + relay); calls to the bank survive
+blips (keyed retries); a bank that goes silent no longer leaves a payment
+pretending nothing happened (`Unknown`), and a resolver finds out what
+really happened for payments nobody comes back for. Consumers get a loop
+that one bad message can't block (dead-letter topic). The full design, with
+diagrams and every scenario: [`docs/RELIABILITY.md`](docs/RELIABILITY.md).
+
+```
+ Pay ─► Payment ──[ one transaction: payment row + outbox row ]
+           │                         └─► relay (one at a time) ─► Kafka payx.payments ─► consumers
+           │                                                                  └ can't process ─► payx.payments.dlq
+           └─► Vault ─[ retries: 3 s attempts, backoff + jitter, 10 s total ]─► PSP
+                 no answer ─► Unknown (202) ─► retry with same key, or the resolver asks the PSP by reference
+```
+
+### 6.1 Transactional outbox
+
+**Built:** every `Payment.MoveTo` records a numbered status change;
+`PaymentsDbContext.SaveChangesAsync` writes each as an `outbox_messages` row
+(`PaymentEvent` JSON, key = payment id) in the same transaction. The event
+contract lives in `PayX.Contracts/Events`.
+
+**Why:** saving and publishing are two writes to two systems; a crash
+between them loses or invents an event. One transaction makes them one
+fact. No code path writes events itself, so none can forget one.
+
+**Verify:** pay + capture → three outbox rows in order; a save the database
+refuses writes neither the status nor the event (test).
+
+### 6.2 Outbox relay
+
+**Built:** `Jobs/OutboxRelay` runs `OutboxPublisher` passes: advisory lock
+(one relay across all instances), oldest unpublished first, produce to
+`payx.payments` with key = payment id, wait for Kafka's confirmation, mark
+published. Producer with `acks=all` and idempotence.
+
+**Why:** at-least-once delivery in order. Marking after confirming may
+publish twice (consumers dedupe); marking first could lose an event.
+
+**Verify:** stop Kafka, pay and capture: both work, events wait; start
+Kafka: they are published within seconds.
+
+**Talking point:** the request path never touches Kafka, so a Kafka outage
+delays announcements, never payments.
+
+### 6.3 Retries with backoff and jitter
+
+**Built:** `AddKeyedRetries` (ServiceDefaults): total 10 s ⊃ 2 retries
+(5xx, 408, 429, no answer; waits from 200 ms, doubling, jittered) ⊃ 3 s per
+attempt. On Vault → PSP and Payment → PSP; not on Payment → Vault.
+
+**Why:** a blip shouldn't fail a payment, and the same key makes repeating
+a POST safe. One retry layer only: nested retries multiply (27 attempts).
+
+**Verify:** PSP frozen 4 s mid-payment → attempt cut at 3 s, retried, 201
+in 4.4 s, the PSP holds one key.
+
+### 6.4 The Unknown state
+
+**Built:** status `Unknown` (RiskApproved → Unknown → Authorized / Declined).
+A timeout makes the payment Unknown and the answer **202 Accepted**, which
+is not stored under the key, so a retry asks the bank again with the same
+key.
+
+**Why:** a timeout hides three cases (never arrived, failed, succeeded with
+the answer lost). Calling it failed risks a double charge; calling it
+success books money the bank never approved.
+
+**Verify:** PSP frozen 12 s → 202 Unknown; same key afterwards → 201
+Authorized, same payment.
+
+### 6.5 Resolver
+
+**Built:** the payment id travels to the PSP as a merchant reference; the
+PSP can be asked by it. `StuckPaymentResolver` (every 15 s) takes payments
+at Unknown or RiskApproved for over 60 s and records the PSP's answer:
+Authorized, Declined, or the new final status `Failed` (no record, nothing
+held). An unreachable PSP proves nothing.
+
+**Why:** customers close tabs and processes die; a hold must never sit on a
+card with no record of it on our side.
+
+**Verify:** nobody retrying: PSP stopped → Failed after 60 s; a lost answer
+(the PSP holds the authorization) → Authorized with the PSP's id.
+
+### 6.6 Dead-letter topic
+
+**Built:** `DeadLetteringConsumer<THandler>` (ServiceDefaults): commit after
+handling; malformed → `payx.payments.dlq` at once; other failures retried in
+place with doubling waits, then dead-lettered; the copy carries why and
+where, and is confirmed before the commit.
+
+**Why:** Kafka commits per partition, so one message that always fails
+blocks a sixth of all payments, or gets skipped and lost.
+
+**Verify:** test against real Kafka: good / poison / good → both good
+handled, poison in the DLQ, committed offset 3.
+
+### Phase 6 in one paragraph
+
+A payment's every move is now written with its announcement in one
+transaction and published to Kafka in order, at least once, whatever
+crashes in between. Calls to the bank retry safely because they carry the
+same key, within budgets that nest. When the bank goes silent, PayX says
+`Unknown` instead of guessing, and either the customer's retry or the
+resolver gets the bank's real answer. Consumers can't be blocked by one bad
+message. What is still missing is the consumer itself: Phase 7 builds the
+Ledger, which books these events into a double-entry journal, dedupes them,
+and keeps merchant balances.

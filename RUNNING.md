@@ -183,6 +183,28 @@ configuration: `Risk:Rules` and `Risk:Decision` in Risk's
 **LocalStack is not persistent.** Restarting it creates a new KMS key and an
 empty `payx-card-vault` table, so every token from before the restart is gone.
 
+### Reliability (Phase 6)
+
+Payment now needs Kafka for its events (the relay retries until Kafka is
+there; payments work without it). Full design: [`docs/RELIABILITY.md`](docs/RELIABILITY.md).
+
+```bash
+# events waiting / published (outbox)
+docker exec payx-postgres psql -U payx_payments -d payx_payments \
+  -c "select id, event_type, key, published_at from outbox_messages order by id desc limit 10"
+# the events on Kafka: Kafka UI http://localhost:7090 → Topics → payx.payments (key = payment id)
+```
+
+| Drill | Do | Expect |
+| --- | --- | --- |
+| Kafka down | `docker compose stop kafka`, pay and capture, `docker compose start kafka` | 201 / 200; events wait (`published_at` empty), then publish within seconds |
+| Bank blip | `docker pause payx-psp-simulator`, pay, `docker unpause` within ~3 s | 201 after a retry (Vault logs `Execution attempt`) |
+| Bank silent | `docker pause payx-psp-simulator`, pay, wait > 10 s | 202 `Unknown`; after `docker unpause`, the same key → the bank's answer |
+| Nobody comes back | `docker compose stop psp-simulator`, pay (502), `docker compose start psp-simulator`, wait 60–75 s | status `Failed` (or `Authorized` if the PSP did hold it): the resolver |
+| Dead letters | (no consumer yet: Ledger, 7.3) | Kafka UI → `payx.payments.dlq`, headers `dlq-*` |
+
+New statuses: `Unknown` (answered 202 Accepted) and `Failed`.
+
 ## 4. Tests
 
 ```bash
@@ -197,6 +219,7 @@ than one that fails.
 `PayX.Payment.Tests` include two integration tests against `payx_payments`,
 so Postgres must be up too (Module 4.1).
 `PayX.Risk.Tests` include Redis tests (velocity, 5.2): Redis must be up.
+`PayX.Payment.Tests` include Kafka tests (relay 6.2, dead-letter consumer 6.6): Kafka must be up (`docker compose up -d kafka kafka-init`).
 
 ## Windows / Git Bash notes
 

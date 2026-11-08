@@ -122,6 +122,12 @@ services you want to step through.
 | §13 Capture refused | Payment | `PaymentCapture.CaptureAsync` (merchant filter, `CaptureRefusal`) | the PSP is never called |
 | Risk scoring (Phase 5) | Risk | `Api/AssessmentsController.cs` → `Assess`; `Repositories/SlidingWindowCounter.cs` → `RecordAsync`; `Domain/RiskRules.cs` → `Score`; `Domain/RiskPolicy.cs` → `Decide` | `recent` (velocity count), `score.Reasons`, `decision` |
 | Payment asks Risk (5.5) | Payment | `Services/PaymentAuthorization.cs` → the `Created` block; `Services/FallbackRiskCheck.cs` → `CheckAsync`; `Services/RiskClient.cs` → `CheckAsync` | `card?.Country` from Vault; `assessment.Decision`; which `catch` fires when Risk fails |
+| Outbox (6.1) | Payment | `Repositories/PaymentsDbContext.cs` → `SaveChangesAsync`; `Domain/Payment.cs` → `MoveTo` | `PendingChanges` before the save; the rows added to `OutboxMessages` |
+| Relay (6.2) | Payment | `Jobs/OutboxPublisher.cs` → `PublishBatchAsync` (`leader`, the `ProduceAsync` loop) | a paused relay holds the advisory lock: other instances publish nothing meanwhile |
+| Retries (6.3) | Vault or Payment | `CardAuthorizer.AuthorizeAsync` / `PspClient.CaptureAsync`; Polly logs each `Execution attempt` | breakpoints in the PSP simulator's `Authorize` hit once per attempt, each with the same `Idempotency-Key` |
+| Unknown (6.4) | Payment | `PaymentAuthorization.AuthorizeAsync` → the `StatusCode == 504` branch; `IdempotentAttribute` (202 not stored) | `payment.Status` after `MarkUnknown` |
+| Resolver (6.5) | Payment | `Services/StuckPaymentResolver.cs` → `FindStuckAsync`, `ResolveAsync` | lower `Resolver:GracePeriod` / `Interval` locally to hit it sooner |
+| Dead letters (6.6) | a consumer (Ledger, 7.3) | `ServiceDefaults/Kafka/DeadLetteringConsumer.cs` → `ProcessAsync`, `DeadLetterAsync` | the attempt count; the DLQ headers |
 | Risk outage (5.6–5.7) | Payment | `RiskClient.CheckAsync`: the `BrokenCircuitException` and `TimeoutRejectedException` catches; `FallbackRiskCheck` the threshold check | pausing in Risk itself trips Payment's 2 s timeout: debug Risk with `Risk:Timeout` raised in Payment's settings |
 | Token checks | Payment or Gateway | ServiceDefaults `JwtAuthenticationExtensions.cs` (configuration); add `options.Events` there to break on `OnAuthenticationFailed` | `User.FindFirst("sub")` in the controllers |
 

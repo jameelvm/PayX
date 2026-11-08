@@ -665,9 +665,16 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 6 wrap-up (README, DESIGN, RUNNING, DEBUGGING, docs/RELIABILITY.md),
-then Phase 7, Module 7.1 — accounts + journal + postings.** First confirm
-decision 10 (wallet balances inside Ledger), deferred to the start of Phase 7. (Owner asked for the whole
+**Phase 7, Module 7.1 — accounts + journal + postings.** First confirm
+decision 10 (wallet balances inside Ledger), deferred to the start of Phase 7.
+
+**Phase 6 complete (2026-11-08): all six modules committed; wrap-up done** —
+`docs/RELIABILITY.md` (design + diagrams + 15 scenarios), README Phase 6
+section, DESIGN (decisions 4, 5, 8, 15 accepted; 9 failure-mode rows
+updated or added; 6 Q&A; 5 doc-to-code rows; open questions), RUNNING
+(drills), DEBUGGING (breakpoints). Open from Phase 6 (DESIGN §4): outbox
+cleanup, capture Unknown/resolver, stuck Created payments, DLQ replay tool,
+consumer pause during dependency outages. (Owner asked for the whole
 phase in one go, 2026-11-08: commit per module, document at the end.)
 
 6.1 done (2026-11-08): decision 4 (one topic per aggregate) and 5 (outbox)

@@ -288,11 +288,11 @@ also a one-module experiment if we ever want to compare the two.)
 | Failure | Effect without mitigation | Mitigation | Phase verified |
 |---|---|---|---|
 | Customer double-clicks Pay | Two charges | Client-generated Idempotency-Key + PG unique key + stored response | ✅ 4.5 (repeat → same payment, `Idempotent-Replayed`; true double-click → 201 + 409 `request_in_progress`, one payment; 10 simultaneous claims → 1 winner) |
-| PSP times out after authorizing | Retry → second auth, or sale marked failed while customer charged | Same PSP idempotency key on retry; `UNKNOWN` + resolver | PSP side ✅ 3.4 (a retry with the same key replays), reproducible on demand ✅ 3.5 (`X-Psp-Fault: timeout-after-success`); caller side ✅ 4.7 (PSP down → 502; same key after recovery → Authorized, one payment, one PSP authorization); without a retry: 6.4–6.5 |
-| PSP returns 5xx / is slow | Payment fails although a retry would succeed; or threads pile up waiting | Retry with backoff + jitter (a 5xx did no work, so retrying is safe); timeouts | Reproducible ✅ 3.5 (`error=503`, `latency=ms`; injected 5xx claims no idempotency key); caller side: 6.3 |
-| PaymentService crashes after DB commit, before publishing event | Ledger never credits merchant | Outbox: event is in the same commit; relay publishes on restart | — |
-| Ledger consumer crashes mid-processing | Event lost or applied twice | Commit offset only after PG commit; `processed_events` dedupe | — |
-| Kafka unavailable | Payments can't announce completion | Outbox buffers in PG; payment API still works; relay drains on recovery | — |
+| PSP times out after authorizing | Retry → second auth, or sale marked failed while customer charged | Same PSP idempotency key on retry; `UNKNOWN` + resolver | PSP side ✅ 3.4 (a retry with the same key replays), reproducible on demand ✅ 3.5 (`X-Psp-Fault: timeout-after-success`); caller side ✅ 4.7 (PSP down → 502; same key after recovery → Authorized, one payment, one PSP authorization); without a retry ✅ 6.4–6.5 (no answer in time → `Unknown`, 202; the resolver asks the PSP by reference after 60 s) |
+| PSP returns 5xx / is slow | Payment fails although a retry would succeed; or threads pile up waiting | Retry with backoff + jitter (a 5xx did no work, so retrying is safe); timeouts | Reproducible ✅ 3.5 (`error=503`, `latency=ms`; injected 5xx claims no idempotency key); caller side ✅ 6.3 (keyed retries: PSP paused 4 s mid-payment → attempt cut at 3 s, retried, 201 Authorized, one PSP key) |
+| PaymentService crashes after DB commit, before publishing event | Ledger never credits merchant | Outbox: event is in the same commit; relay publishes on restart | ✅ 6.1–6.2 (a refused save writes neither; relay publishes whatever is unpublished, oldest first) |
+| Ledger consumer crashes mid-processing | Event lost or applied twice | Commit offset only after PG commit; `processed_events` dedupe | Consumer loop ✅ 6.6 (commit only after handling); the Ledger's transaction and dedupe: 7.3–7.4 |
+| Kafka unavailable | Payments can't announce completion | Outbox buffers in PG; payment API still works; relay drains on recovery | ✅ 6.2 (Kafka stopped: pay + capture 201/200, 3 events waited; Kafka back: published in ~12 s) |
 | Risk service down | All payments blocked | Circuit breaker + amount-threshold fallback (dec. 12) | ✅ 5.7 (drill with Risk paused: 4 × 504 in ~2 s, then 503 `risk_circuit_open` in 0.03 s; a $50 payment Authorized via the fallback, stored with no score; after the break, normal) |
 | Risk service slow | Every checkout hangs; threads, DB connections and idempotency locks pile up until Payment falls over | 2 s Polly timeout on the Risk call; payment stays Created, retryable 504 | ✅ 5.6 (`docker pause payx-risk` → 504 in 2.1 s instead of up to 100 s; same key after recovery → same payment) |
 | Risk retried for the same payment | Velocity counts one payment twice and blocks an honest customer | Sorted-set member = payment id, `ZADD NX` | ✅ 5.2 (repeated assessment counted once) |
@@ -311,8 +311,8 @@ also a one-module experiment if we ever want to compare the two.)
 | CVC outlives its authorization (kept, logged, or read twice) | Stored card security data, forbidden by PCI DSS; a replayed CVC | Never in DynamoDB; Redis value encrypted, TTL, single-use `GETDEL` (decision 29) | ✅ 4.2a (taken once then null; 10 concurrent takes → 1; 1 s TTL expires; not in logs) |
 | PSP unreachable or slow, seen from Vault | Caller can't tell "nothing happened" from "it may have happened" | 502 `psp_unreachable` vs 504 `psp_timeout`, never "failed" (decision 30) | ✅ 4.2b (PSP stopped → 502; stub PSP slower than the timeout → 504) |
 | Retry of a Vault authorization after a timeout or lost response | 409 `cvc_unavailable` instead of the PSP's replay: the caller can't learn the outcome by retrying | CVC kept until the PSP's answer is definitive (2xx/4xx), then forgotten; that answer remembered per (token, key) for 24 h and replayed (`Idempotent-Replayed`) | ✅ 4.7 (tests: timeout → retry sends the identical request; same key → replay without calling the PSP; PSP 503 → CVC kept. End to end: outage then retry → Authorized) |
-| Payment process dies between the PSP authorizing and saving Authorized | Hold on the customer's card, no record of it on our side | Payment saved (Created → RiskApproved) before the call, with a key fixed to the payment (decision 31) | Row present ✅ 4.2c; resolving it: 6.4–6.5 |
-| Vault/PSP refuses, times out or is down during authorize | Payment stuck with no outcome | Stays RiskApproved, caller gets 422 / 502 / 504 with the payment id | Shown ✅ 4.2c (card_not_found, cvc_unavailable → 422; PSP down → 502); no automatic resolution yet ❌ (6.4–6.5) |
+| Payment process dies between the PSP authorizing and saving Authorized | Hold on the customer's card, no record of it on our side | Payment saved (Created → RiskApproved) before the call, with a key fixed to the payment (decision 31) | Row present ✅ 4.2c; resolved ✅ 6.5 (resolver asks the PSP by reference: a simulated lost answer → Authorized with the PSP's auth id) |
+| Vault/PSP refuses, times out or is down during authorize | Payment stuck with no outcome | Stays RiskApproved, caller gets 422 / 502 / 504 with the payment id | Shown ✅ 4.2c (card_not_found, cvc_unavailable → 422; PSP down → 502); timeouts → `Unknown` ✅ 6.4; automatic resolution ✅ 6.5 (nobody retrying: PSP stopped → Failed after 60 s, the PSP holding nothing) |
 | Malformed or unsupported amount reaches the API | 500 from a constructor throwing mid-deserialization | Request DTO with plain validated fields, converted to `Money` in the action | ✅ 4.2c (XYZ → 400, 0 → 400; found as a 500 first) |
 | PSP down or slow during capture | Merchant can't take the money; or a retry captures twice | Payment stays Authorized; same fixed key on retry → PSP replays or performs it once (decision 32) | ✅ 4.3 (PSP down → 502, retry after recovery → Captured, PSP shows one capture) |
 | PSP refuses an operation (409 with ProblemDetails) | Payment crashed with a 500 reading the refusal | Success and ProblemDetails read as two shapes (`status` is text in one, a number in the other) | ✅ 4.3 (caught by the tests before any manual run) |
@@ -320,6 +320,11 @@ also a one-module experiment if we ever want to compare the two.)
 | A response names an internal instance (`Location: http://localhost:7082/…` behind the Gateway) | Clients learn and follow internal addresses that bypass the edge | Relative `Location` | ✅ 4.4 (found, then fixed) |
 | Payment process dies mid-authorize (after the payment row, before the answer) | Retry creates a second payment with a new PSP key: two holds if the first was authorized | Recovery point (payment id on the key, same transaction) + resumable steps (decision 33) | ✅ 4.6 (tests: resume at the Vault step with the same PSP key, one payment; outcome already reached → Vault not called) |
 | A key's request ended 5xx or died | Every retry 409 `request_in_progress`, forever (4.5's limit) | 5xx releases the lock; death lets it lapse; retry takes over (one winner of 10) | ✅ 4.6 (PSP down → 502, key released with recovery point → retry resumed the same payment) |
+| Two outbox relays (two Payment instances) publish at once | One payment's events overtake each other; the Ledger sees "captured" before "authorized" | One relay at a time: transaction-scoped advisory lock | ✅ 6.2 (test: lock held elsewhere → this relay publishes nothing) |
+| Relay dies after Kafka confirmed, before marking the row | The event is published twice | At least once by design; consumers dedupe by `eventId` (7.4) | Accepted trade-off (6.2) |
+| Retries at every layer | 3 × 3 × 3 attempts per click; a retry storm on a struggling PSP | Retry only at the hop nearest the PSP; nested budgets (Vault 10 s < Payment 15 s < lock 30 s) | ✅ 6.3 |
+| A poison message on a partition | The consumer can't commit past it: one partition's payments stop, or the event is skipped and lost | Dead-letter topic: malformed → at once, others after 5 attempts; DLQ copy confirmed before the commit | ✅ 6.6 (good/poison/good → both good handled, poison in DLQ, offset 3) |
+| The resolver and a customer's retry resolve the same payment at once | Two different outcomes recorded | Both take the PSP's answer; `xmin` lets one save win | ✅ 6.5 (design; the loser logs and backs off) |
 | Concurrent authorizations on one card (PSP side) | Credit reserved twice: $10,001 held on a $5,000 card | Row lock on the card account during check-and-hold (decision 22) | ✅ Module 3.2 |
 
 ## §3 Q&A bank (seed — from the doc's own prompts)
@@ -377,6 +382,36 @@ also a one-module experiment if we ever want to compare the two.)
   escalate the rest; correct via reversing ledger entries, never edits.
 - *Buy button hit many times?* Idempotency key generated once per checkout
   session, disabled button client-side, server dedupe as the real guarantee.
+
+- *Why not publish to Kafka right after saving the payment?* (6.1) Two
+  writes to two systems can't be atomic: a crash between them loses the
+  event (save, then crash) or invents one (publish, then the save fails).
+  The outbox puts the event in the same database transaction as the change,
+  and a relay publishes it afterwards. CDC (Debezium reading the WAL) is the
+  production alternative to a hand-written relay.
+- *The relay publishes, then crashes before marking the row. Now what?*
+  (6.2) The event is published again on the next pass: delivery is at least
+  once, by choice. Marking first would make it at most once, and a lost
+  "captured" event is money the ledger never sees. Consumers dedupe by
+  `eventId`.
+- *How do you keep one payment's events in order across several Payment
+  instances?* (6.2) Kafka orders within a partition, so the key is the
+  payment id; and only one relay publishes at a time (advisory lock), oldest
+  first, each confirmed before the next.
+- *Is it safe to retry a payment POST?* (6.3) Only with an idempotency key
+  the server honours. Then a retry either replays the first result or does
+  the work once. Retry 5xx/timeouts with exponential backoff and jitter;
+  never 4xx or declines; retry at one layer only, with nested time budgets.
+- *The bank timed out. Was the customer charged?* (6.4–6.5) Unknown, and
+  PayX says so: status `Unknown`, 202 Accepted. A retry with the same key
+  asks the bank again; if nobody retries, the resolver asks the PSP by the
+  payment's reference after a grace period and records its answer
+  (Authorized, Declined, or Failed when the PSP has no record). Never guess.
+- *One bad message is stuck in a Kafka partition. What do you do?* (6.6)
+  Retry a few times in place (a dependency may have blinked); if it can't
+  be processed (malformed, or still failing), copy it with its context to a
+  dead-letter topic, wait for that write to be confirmed, then commit past
+  it. Inspect, fix and replay from the dead-letter topic.
 
 - *Detection vs decision: why two steps with two configs?* (5.1–5.3) The
   score answers "how suspicious is this?" and is tuned by fraud analysts as
@@ -480,6 +515,10 @@ also a one-module experiment if we ever want to compare the two.)
 - Risk decision audit record in `payx-risk-decisions` (DynamoDB, bootstrapped in 1.3, still unused): Payment stores score and reasons on the payment, but Risk keeps no history of its own.
 - 3-D Secure challenge flow — modelled as the final `Challenged` state (5.5); completing a challenge is deferred.
 - Vault's country lookup before the Risk call has only Vault's 15 s client timeout, not Risk's 2 s pipeline (5.6).
+- Outbox rows are never deleted after publishing (6.2): a cleanup job keeping a few days.
+- A capture that times out has no `Unknown` state and no resolver (6.4–6.5 cover authorize): a retry with the same key resolves it.
+- Payments stuck at `Created` (Risk never answered, nobody retried) stay there; harmless, the bank was never asked.
+- Dead-letter replay is manual (Kafka UI); a long dependency outage dead-letters good messages after 5 attempts. Pausing the consumer while its dependency is down is the production fix.
 - Multi-PSP routing / failover — mention only, unless time allows.
 - Payouts from merchant available balance to bank — deferred.
 - Refresh tokens and token revocation (Module 2.3 issues 15-minute access
@@ -529,3 +568,8 @@ every phase; rows for later phases are added when they land.
 | Payment service → fraud detection + risk check → gateway (ch.2 HLD) | 5.5 | [`Payment/Services/RiskClient.cs`](src/services/PayX.Payment/Services/RiskClient.cs), `PaymentAuthorization.AuthorizeAsync` |
 | Transient failures: timeouts (ch.2) | 5.6 | [`Payment/Services/RiskClientRegistration.cs`](src/services/PayX.Payment/Services/RiskClientRegistration.cs) (`AddTimeout`) |
 | Transient failures: fallbacks (ch.2; decision 12) | 5.7 | same file (`AddCircuitBreaker`), [`Payment/Services/FallbackRiskCheck.cs`](src/services/PayX.Payment/Services/FallbackRiskCheck.cs) |
+| Transaction completion: "publish an event to Kafka… consumers process it" (ch.2) | 6.1–6.2 | [`Payment/Repositories/PaymentsDbContext.cs`](src/services/PayX.Payment/Repositories/PaymentsDbContext.cs) (`SaveChangesAsync` → outbox), [`Repositories/OutboxMessage.cs`](src/services/PayX.Payment/Repositories/OutboxMessage.cs), [`Jobs/OutboxPublisher.cs`](src/services/PayX.Payment/Jobs/OutboxPublisher.cs), [`Jobs/OutboxRelay.cs`](src/services/PayX.Payment/Jobs/OutboxRelay.cs), [`Contracts/Events/PaymentEvent.cs`](src/shared/PayX.Contracts/Events/PaymentEvent.cs) |
+| Transient failures: retry with exponential backoff (ch.2) | 6.3 | [`ServiceDefaults/RetryExtensions.cs`](src/shared/PayX.ServiceDefaults/RetryExtensions.cs), used in `Vault/Program.cs` and `Payment/Program.cs` |
+| Timeouts: "the request may or may not have gone through" (ch.2) | 6.4 | `PaymentStatus.Unknown`, `PaymentAuthorization.AuthorizeAsync`, 202 in [`Api/PaymentsController.cs`](src/services/PayX.Payment/Api/PaymentsController.cs) |
+| Resolving the unknown (ch.2 transient failures) | 6.5 | [`Payment/Services/StuckPaymentResolver.cs`](src/services/PayX.Payment/Services/StuckPaymentResolver.cs), [`Jobs/StuckPaymentResolverJob.cs`](src/services/PayX.Payment/Jobs/StuckPaymentResolverJob.cs); PSP lookup by reference in [`PspSimulator/Api/AuthorizationsController.cs`](src/services/PayX.PspSimulator/Api/AuthorizationsController.cs) |
+| A message is only marked consumed once processed (ch.2); poison messages | 6.6 | [`ServiceDefaults/Kafka/DeadLetteringConsumer.cs`](src/shared/PayX.ServiceDefaults/Kafka/DeadLetteringConsumer.cs), `payx.payments.dlq` in [`infra/kafka/create-topics.sh`](infra/kafka/create-topics.sh) |
