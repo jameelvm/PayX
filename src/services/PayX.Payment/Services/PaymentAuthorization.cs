@@ -16,6 +16,7 @@ public sealed record AuthorizationResult(Domain.Payment Payment, int FailureStat
 ///
 /// <code>
 /// save Created ─► risk ─► save RiskApproved ─► Vault → PSP ─► save Authorized / Declined
+///                                                       └─ timeout ─► save Unknown (6.4)
 ///                   ├──► save Challenged  (PSP never called)
 ///                   └──► save RiskBlocked (PSP never called)
 /// </code>
@@ -59,12 +60,29 @@ public sealed class PaymentAuthorization(PaymentsDbContext db, IRiskCheck risk, 
         // Ask for the money, by token. The key is fixed per payment and
         // operation, so asking again for this payment can never become a
         // second authorization at the PSP (decision 7; refined in 4.7).
-        if (payment.Status == PaymentStatus.RiskApproved)
+        // An Unknown payment (6.4) is asked again the same way: the PSP
+        // either replays what it did, or does it now, once.
+        if (payment.Status is PaymentStatus.RiskApproved or PaymentStatus.Unknown)
         {
             var result = await vault.AuthorizeAsync(payment.CardToken, payment.Amount, payment.MerchantId,
                 $"{payment.Id}:authorize", ct);
             if (result.Authorization is not { } answer)
-                return new AuthorizationResult(payment, result.StatusCode, result.Error);
+            {
+                // A timeout (Vault's psp_timeout, or ours waiting for Vault)
+                // means the bank may have said yes: record that we don't know.
+                if (result.StatusCode == 504 && payment.Status == PaymentStatus.RiskApproved)
+                {
+                    payment.MarkUnknown();
+                    await db.SaveChangesAsync(ct);
+                }
+
+                // Still unknown: no new information is not a failure (202).
+                // Otherwise (unreachable, refused) nothing happened at the
+                // bank: the payment stays RiskApproved and the caller retries.
+                return payment.Status == PaymentStatus.Unknown
+                    ? new AuthorizationResult(payment)
+                    : new AuthorizationResult(payment, result.StatusCode, result.Error);
+            }
 
             // A decline is an outcome, not an error.
             if (answer.Status == "authorized")

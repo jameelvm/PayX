@@ -108,9 +108,42 @@ public sealed class PaymentAuthorizationTests
         Assert.Equal(0, _vault.Calls);
     }
 
+    [Fact]
+    public async Task A_timeout_makes_the_payment_Unknown_not_failed()
+    {
+        _vault.Answer(HttpStatusCode.GatewayTimeout, """{"title":"psp_timeout","status":504}""");
+
+        var result = await Authorize();
+
+        Assert.Null(result.Failure);   // no outcome yet is not an error: answered 202
+        Assert.Equal(PaymentStatus.Unknown, (await Reload(result.Payment.Id)).Status);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.OK, """{"authorizationId":"auth_9","status":"authorized","authorizationCode":"Z9Y8X7"}""", PaymentStatus.Authorized)]
+    [InlineData(HttpStatusCode.OK, """{"authorizationId":"auth_9","status":"declined","declineCode":"card_declined"}""", PaymentStatus.Declined)]
+    [InlineData(HttpStatusCode.BadGateway, """{"title":"psp_unreachable","status":502}""", PaymentStatus.Unknown)]
+    [InlineData(HttpStatusCode.Conflict, """{"title":"cvc_unavailable","status":409}""", PaymentStatus.Unknown)]
+    public async Task An_Unknown_payment_asked_again_takes_the_banks_answer_or_stays_Unknown(
+        HttpStatusCode status, string body, PaymentStatus expected)
+    {
+        _vault.Answer(HttpStatusCode.GatewayTimeout, """{"title":"psp_timeout","status":504}""");
+        var key = new CurrentIdempotencyKey { Record = new IdempotencyRecord("caller", $"k-{Guid.NewGuid():N}", "hash", DateTimeOffset.UtcNow.AddSeconds(30)) };
+        var first = await Authorize(key: key);
+        Assert.Equal(PaymentStatus.Unknown, (await Reload(first.Payment.Id)).Status);
+
+        _vault.Answer(status, body);
+        var again = await Authorize(key: key);   // the retry resumes the same payment
+
+        Assert.Equal(first.Payment.Id, again.Payment.Id);
+        Assert.Null(again.Failure);
+        Assert.Equal(expected, (await Reload(first.Payment.Id)).Status);
+        Assert.Equal($"{first.Payment.Id}:authorize", _vault.LastIdempotencyKey);   // same key to the bank
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.Conflict, "cvc_unavailable")]
-    [InlineData(HttpStatusCode.GatewayTimeout, "psp_timeout")]
+    [InlineData(HttpStatusCode.BadGateway, "psp_unreachable")]
     public async Task Without_an_answer_the_payment_stays_RiskApproved(HttpStatusCode status, string error)
     {
         _vault.Answer(status, $$"""{"title":"{{error}}","status":{{(int)status}}}""");
@@ -121,10 +154,10 @@ public sealed class PaymentAuthorizationTests
         Assert.Equal(PaymentStatus.RiskApproved, (await Reload(result.Payment.Id)).Status);
     }
 
-    private Task<AuthorizationResult> Authorize(IRiskCheck? risk = null)
+    private Task<AuthorizationResult> Authorize(IRiskCheck? risk = null, CurrentIdempotencyKey? key = null)
     {
         var client = new VaultClient(new HttpClient(_vault) { BaseAddress = new Uri("http://vault.test/") });
-        return new PaymentAuthorization(NewContext(), risk ?? FixedRisk.Allow(), client, new CurrentIdempotencyKey())
+        return new PaymentAuthorization(NewContext(), risk ?? FixedRisk.Allow(), client, key ?? new CurrentIdempotencyKey())
             .AuthorizeAsync(Customer, Merchant, Amount, "tok_test", default);
     }
 

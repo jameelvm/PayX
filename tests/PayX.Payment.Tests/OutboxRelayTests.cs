@@ -65,14 +65,16 @@ public sealed class OutboxRelayTests
     [Fact]
     public async Task While_one_relay_holds_the_lock_another_publishes_nothing()
     {
-        var paymentId = await PaymentWithTwoEvents();
-
         // Another instance's relay, mid-pass: it holds the advisory lock.
+        // Taken before the events exist, so no relay (the Payment container's
+        // included) can publish them before we look.
         await using var other = new NpgsqlConnection(Db);
         await other.OpenAsync();
         await using var otherTx = await other.BeginTransactionAsync();
         await using (var take = new NpgsqlCommand($"SELECT pg_advisory_xact_lock({OutboxPublisher.RelayLock})", other, otherTx))
             await take.ExecuteNonQueryAsync();
+
+        var paymentId = await PaymentWithTwoEvents();
 
         Assert.Equal(0, await NewPublisher(out var db).PublishBatchAsync(1000, default));
         await db.DisposeAsync();

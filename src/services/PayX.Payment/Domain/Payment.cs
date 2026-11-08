@@ -84,6 +84,14 @@ public sealed class Payment
         AuthorizationCode = authorizationCode;
     }
 
+    /// <summary>
+    /// The bank was asked but didn't answer in time (6.4). Not a failure:
+    /// the authorization may have happened, so treating it as failed would
+    /// lose a sale the customer was charged for, and retrying as new would
+    /// charge twice.
+    /// </summary>
+    public void MarkUnknown() => MoveTo(PaymentStatus.Unknown);
+
     public void Decline(string declineCode)
     {
         MoveTo(PaymentStatus.Declined);

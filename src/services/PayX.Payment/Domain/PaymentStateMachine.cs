@@ -3,7 +3,7 @@ namespace PayX.Payment.Domain;
 /// <summary>
 /// Where a payment is in its life. Stored as text, so a row read in psql says
 /// "Authorized", not "4". More states arrive with the modules that need them:
-/// Unknown (6.4), Settled (8), Refunded and Disputed (9).
+/// Settled (8), Refunded and Disputed (9).
 /// </summary>
 public enum PaymentStatus
 {
@@ -16,6 +16,8 @@ public enum PaymentStatus
     Voided,         // hold released, nothing charged
     Challenged,     // Risk said challenge (5.5): the customer must prove it's them; the PSP isn't called.
                     // Final for now: completing a challenge (3-D Secure) isn't built.
+    Unknown,        // asked the bank, no answer in time (6.4): it may or may not have authorized.
+                    // Only the PSP knows; a retry or the resolver (6.5) finds out.
 }
 
 /// <summary>
@@ -26,7 +28,9 @@ public enum PaymentStatus
 ///
 /// <code>
 /// Created ──► RiskApproved ──► Authorized ──► Captured
-///    │             │               └────────► Voided
+///    │             │  ▲            └────────► Voided
+///    │             │  │
+///    │             ├► Unknown ──► Declined
 ///    ├► RiskBlocked └► Declined
 ///    └► Challenged
 /// </code>
@@ -36,7 +40,9 @@ public static class PaymentStateMachine
     private static readonly Dictionary<PaymentStatus, PaymentStatus[]> Moves = new()
     {
         [PaymentStatus.Created] = [PaymentStatus.RiskApproved, PaymentStatus.RiskBlocked, PaymentStatus.Challenged],
-        [PaymentStatus.RiskApproved] = [PaymentStatus.Authorized, PaymentStatus.Declined],
+        [PaymentStatus.RiskApproved] = [PaymentStatus.Authorized, PaymentStatus.Declined, PaymentStatus.Unknown],
+        // Unknown is resolved by what the PSP says happened, never by a guess (6.4).
+        [PaymentStatus.Unknown] = [PaymentStatus.Authorized, PaymentStatus.Declined],
         [PaymentStatus.Authorized] = [PaymentStatus.Captured, PaymentStatus.Voided],
         // Not listed = final: RiskBlocked, Declined, Captured, Voided, Challenged. Nothing
         // ever goes backwards (a captured payment is undone by a refund, a new

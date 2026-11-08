@@ -11,7 +11,8 @@ public sealed class PaymentStateMachineTests
     private static readonly HashSet<(PaymentStatus, PaymentStatus)> Legal =
     [
         (Created, RiskApproved), (Created, RiskBlocked), (Created, Challenged),
-        (RiskApproved, Authorized), (RiskApproved, Declined),
+        (RiskApproved, Authorized), (RiskApproved, Declined), (RiskApproved, Unknown),
+        (Unknown, Authorized), (Unknown, Declined),
         (Authorized, Captured), (Authorized, Voided),
     ];
 
@@ -86,6 +87,7 @@ public sealed class PaymentStateMachineTests
         {
             Created => [],
             RiskApproved or RiskBlocked or Challenged => [status],
+            Unknown => [RiskApproved, Unknown],
             Authorized or Declined => [RiskApproved, status],
             Captured or Voided => [RiskApproved, Authorized, status],
             _ => throw new ArgumentOutOfRangeException(nameof(status)),
@@ -102,6 +104,7 @@ public sealed class PaymentStateMachineTests
             case RiskApproved: payment.ApproveRisk(); break;
             case RiskBlocked: payment.BlockRisk(); break;
             case Challenged: payment.ChallengeRisk(); break;
+            case Unknown: payment.MarkUnknown(); break;
             case Authorized: payment.Authorize("auth_test", "A1B2C3"); break;
             case Declined: payment.Decline("card_declined"); break;
             case Captured: payment.Capture(payment.Amount); break;

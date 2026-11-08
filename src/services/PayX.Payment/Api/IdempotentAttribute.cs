@@ -66,7 +66,9 @@ public sealed class IdempotencyFilter(IdempotencyService idempotency, CurrentIde
         // and replaying it forever would stop the caller ever finding out
         // what happened: the 3.5 lesson. Those keys are released instead, so
         // the very next retry takes over and resumes the same payment.
-        if (executed.Result is ObjectResult { StatusCode: < 500 } result)
+        // 202 is not an outcome either (6.4: "accepted, outcome unknown"):
+        // storing it would replay "unknown" forever after the bank answered.
+        if (executed.Result is ObjectResult { StatusCode: < 500 and not 202 } result)
         {
             var location = (result as CreatedResult)?.Location;
             await idempotency.CompleteAsync(claim.Record!, result.StatusCode ?? 200,

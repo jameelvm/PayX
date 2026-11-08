@@ -93,6 +93,12 @@ public sealed class PaymentsController(PaymentAuthorization authorization, Payme
         // points at checkPaymentStatus, and is relative on purpose: behind
         // the Gateway, an absolute URL built here named the internal instance
         // (http://localhost:7082/…) instead of the Gateway (found in 4.4).
+        // 202 for Unknown (6.4): accepted, outcome pending. Not stored under
+        // the idempotency key (IdempotencyFilter), so a retry asks the bank
+        // again; or the client polls checkPaymentStatus at Location.
+        if (result.Payment.Status == Domain.PaymentStatus.Unknown)
+            return Accepted($"/api/payments/{result.Payment.Id}", PaymentResponse.From(result.Payment));
+
         return Created($"/api/payments/{result.Payment.Id}", PaymentResponse.From(result.Payment));
     }
 }
