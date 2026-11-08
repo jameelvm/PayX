@@ -225,6 +225,7 @@ services:
       Vault__BaseUrl: "http://payx-host:7084/"
       Psp__BaseUrl: "http://payx-host:7088/"
       Risk__BaseUrl: "http://payx-host:7083/"
+      Kafka__BootstrapServers: "kafka:9092"
 
   # Internal only (no Gateway route): Payment calls it before any money is
   # asked for (5.5). Redis holds its velocity counters (5.2).

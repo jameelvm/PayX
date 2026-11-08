@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using PayX.Payment.Jobs;
 using PayX.Payment.Repositories;
 using PayX.Payment.Services;
 using PayX.ServiceDefaults;
@@ -25,6 +26,13 @@ builder.Services.AddScoped<PaymentCapture>();
 builder.Services.AddScoped<PaymentQueries>();
 builder.Services.AddScoped<IdempotencyService>();
 builder.Services.AddScoped<CurrentIdempotencyKey>();
+
+// Transaction completion (6.2): the outbox relay publishes payment events to
+// Kafka in the background; the request path never touches Kafka.
+builder.AddKafkaProducer();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<OutboxPublisher>();
+builder.Services.AddHostedService<OutboxRelay>();
 
 // Typed client for Vault. A plain timeout for now; retries and circuit
 // breaking (Polly) come in Phases 5-6.

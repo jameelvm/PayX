@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 37 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 38 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -66,7 +66,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 3 | [PSP Simulator + Vault](#phase-3-psp-simulator--vault) | payment gateway, card network, issuer; card-data encryption | 7 / 7 | ✅ |
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 9 / 9 | ✅ |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 7 / 7 | ✅ |
-| 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 1 / 6 | 🔄 |
+| 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 2 / 6 | 🔄 |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
 | 8 | [Settlement + Reconciliation](#phase-8-settlement--reconciliation) | reconciliation system | 0 / 4 | ⬜ |
 | 9 | [Refunds + disputes](#phase-9-refunds--disputes) | dispute management | 0 / 3 | ⬜ |
@@ -144,7 +144,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | | Module | What it builds | Concept |
 |---|---|---|---|
 | ✅ | 6.1 | Outbox table, written in the payment's transaction | no dual writes |
-| ⬜ | 6.2 | Outbox relay → Kafka | never lose an event |
+| ✅ | 6.2 | Outbox relay → Kafka | never lose an event |
 | ⬜ | 6.3 | Retries with exponential backoff + jitter on PSP calls | retry strategy |
 | ⬜ | 6.4 | `UNKNOWN` state on timeout | timeout ambiguity |
 | ⬜ | 6.5 | Resolver job | resolving the unknown |
@@ -665,7 +665,7 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 6, Module 6.2 — outbox relay → Kafka.** (Owner asked for the whole
+**Phase 6, Module 6.3 — retries with exponential backoff + jitter on PSP calls.** (Owner asked for the whole
 phase in one go, 2026-11-08: commit per module, document at the end.)
 
 6.1 done (2026-11-08): decision 4 (one topic per aggregate) and 5 (outbox)
@@ -677,6 +677,16 @@ identity id, unique event_id, jsonb payload, partial index on unpublished).
 Payment tests 112/112 (3 new: events in order with sequence 1-3; a save
 refused by a constraint writes neither change nor event; a second save adds
 nothing). Live: pay + capture → 3 unpublished rows in order.
+
+6.2 done (2026-11-08): `Confluent.Kafka` 2.16.0 in ServiceDefaults
+(`AddKafkaProducer`: acks=all, idempotent producer, murmur2 partitioner).
+`Jobs/OutboxPublisher` (one pass: advisory lock 62001 so one relay at a
+time → per-payment order; oldest first; produce awaited one by one; mark
+published only after Kafka confirms → at-least-once) and `Jobs/OutboxRelay`
+(BackgroundService: 100 per pass, 0.5 s idle poll, 5 s after a failure).
+Payment tests 115/115 (3 new against real Kafka). Live: relay drained the
+101-event backlog on start; Kafka stopped → pay + capture still 201/200,
+3 events wait; Kafka started → published within ~12 s.
 
 **Phase 5 complete (2026-11-06): all seven modules committed; wrap-up done**
 — README Phase 5 teaching section, DESIGN (6 failure-mode rows, 6 Q&A
