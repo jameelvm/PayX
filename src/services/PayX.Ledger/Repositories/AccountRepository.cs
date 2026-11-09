@@ -10,7 +10,21 @@ namespace PayX.Ledger.Repositories;
 /// </summary>
 public sealed class AccountRepository(LedgerDbContext db)
 {
-    public async Task<Dictionary<AccountKey, Account>> GetOrCreateAsync(IEnumerable<AccountKey> keys, CancellationToken ct)
+    /// <summary>
+    /// The accounts, created if new, <b>locked</b> (<c>FOR UPDATE</c>) until
+    /// the caller's transaction ends (7.5). Must run inside a transaction.
+    ///
+    /// <para>The lock is what makes "balance += amount" safe with several
+    /// consumers: a second booking on the same account waits for the first
+    /// to commit, then reads the balance it left. Without it both read 100,
+    /// both write 100 + their amount, and one booking vanishes from the
+    /// balance (a lost update) while its postings stay.</para>
+    ///
+    /// <para>Locked in id order, always: two bookings that touch the same
+    /// two accounts then queue instead of each holding one and waiting for
+    /// the other (a deadlock).</para>
+    /// </summary>
+    public async Task<Dictionary<AccountKey, Account>> LockAsync(IEnumerable<AccountKey> keys, CancellationToken ct)
     {
         var wanted = keys.Distinct().ToList();
         foreach (var key in wanted)
@@ -23,10 +37,21 @@ public sealed class AccountRepository(LedgerDbContext db)
                 """, ct);
         }
 
-        var found = new Dictionary<AccountKey, Account>();
+        var ids = new List<long>();
         foreach (var key in wanted)
-            found[key] = await db.Accounts.SingleAsync(
-                a => a.Type == key.Type && a.OwnerId == key.OwnerId && a.Currency == key.Currency, ct);
-        return found;
+            ids.Add(await db.Accounts.AsNoTracking()
+                .Where(a => a.Type == key.Type && a.OwnerId == key.OwnerId && a.Currency == key.Currency)
+                .Select(a => a.Id).SingleAsync(ct));
+
+        // EF hands back an already-tracked entity as it is, without the
+        // values it just read: a context that loaded this account earlier
+        // would keep a stale balance even under the lock. Forget them first.
+        foreach (var tracked in db.ChangeTracker.Entries<Account>().Where(e => ids.Contains(e.Entity.Id)).ToList())
+            tracked.State = EntityState.Detached;
+
+        var locked = await db.Accounts
+            .FromSql($"SELECT * FROM accounts WHERE id = ANY({ids.ToArray()}) ORDER BY id FOR UPDATE")
+            .ToListAsync(ct);
+        return locked.ToDictionary(a => a.Key);
     }
 }

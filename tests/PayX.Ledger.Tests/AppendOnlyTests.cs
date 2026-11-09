@@ -40,19 +40,6 @@ public sealed class AppendOnlyTests
         Assert.Contains(table, ex.MessageText);
     }
 
-    [Theory]
-    [InlineData("TRUNCATE postings")]
-    [InlineData("TRUNCATE journal_entries CASCADE")]
-    [InlineData("TRUNCATE accounts CASCADE")]
-    public async Task Nobody_can_truncate_the_books(string sql)
-    {
-        _ = await AnEntry();   // make sure the tables exist
-
-        var ex = await Assert.ThrowsAsync<PostgresException>(() => Execute(LedgerDb.OwnerConnection, sql, 0));
-
-        Assert.Equal(PostgresErrorCodes.RestrictViolation, ex.SqlState);
-    }
-
     [Fact]
     public async Task The_service_role_can_still_append()
     {
@@ -65,7 +52,7 @@ public sealed class AppendOnlyTests
         Assert.Equal(2L, await count.ExecuteScalarAsync());
     }
 
-    private static async Task<long> AnEntry()
+    internal static async Task<long> AnEntry()
     {
         Guid customer = Guid.NewGuid(), merchant = Guid.NewGuid();
         await using var db = LedgerDb.NewContext();
@@ -77,7 +64,7 @@ public sealed class AppendOnlyTests
         return entry.Entry!.Id;
     }
 
-    private static async Task Execute(string connectionString, string sql, long entryId)
+    internal static async Task Execute(string connectionString, string sql, long entryId)
     {
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync();

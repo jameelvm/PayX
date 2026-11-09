@@ -56,7 +56,22 @@ public sealed class Account
     public string Currency { get; private set; } = null!;
     public DateTimeOffset CreatedAt { get; private set; }
 
+    /// <summary>
+    /// The wallet (7.5; DESIGN decision 10): the sum of this account's
+    /// postings, kept up to date in the same transaction that adds them.
+    /// Signed like the postings (credit-normal accounts go negative when
+    /// they hold money). A projection, never a source: if it ever disagreed
+    /// with the postings, the postings win (<c>BalanceAudit</c>).
+    /// </summary>
+    public long BalanceMinor { get; private set; }
+
     private Account() { }   // EF Core
 
     public AccountKey Key => new(Type, OwnerId, Currency);
+
+    /// <summary>The balance as its owner reads it: positive when the account holds money, whatever its normal side.</summary>
+    public long DisplayBalanceMinor => Type.IsCreditNormal() ? -BalanceMinor : BalanceMinor;
+
+    /// <summary>Only <see cref="Services.LedgerWriter"/> calls this, with the account row locked, next to the posting it reflects.</summary>
+    internal void Apply(long amountMinor) => BalanceMinor = checked(BalanceMinor + amountMinor);
 }

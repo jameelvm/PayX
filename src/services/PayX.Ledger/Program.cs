@@ -18,6 +18,7 @@ builder.Services.AddDbContext<LedgerDbContext>(options => options
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<AccountRepository>();
 builder.Services.AddScoped<LedgerWriter>();
+builder.Services.AddScoped<BalanceAudit>();
 
 // Transaction completion (7.3): every payment event is read from Kafka and
 // booked; the offset is committed only after the booking committed. Events

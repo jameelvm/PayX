@@ -38,6 +38,8 @@ public sealed class LedgerDbContext(DbContextOptions<LedgerDbContext> options) :
             // point at it and the database checks the posting's currency.
             account.HasAlternateKey(a => new { a.Id, a.Currency });
             account.Ignore(a => a.Key);
+            account.Ignore(a => a.DisplayBalanceMinor);
+            account.Property(a => a.BalanceMinor).HasDefaultValue(0L);
         });
 
         modelBuilder.Entity<JournalEntry>(entry =>
