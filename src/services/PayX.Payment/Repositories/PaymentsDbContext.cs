@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using PayX.Contracts.Events;
 using PayX.Payment.Domain;
@@ -13,10 +12,6 @@ public sealed class PaymentsDbContext(DbContextOptions<PaymentsDbContext> option
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
-    private static readonly JsonSerializerOptions EventJson = new(JsonSerializerDefaults.Web)
-    {
-        Converters = { new JsonStringEnumConverter() },
-    };
 
     /// <summary>
     /// The transactional outbox (6.1, DESIGN decision 5). Every status change
@@ -43,7 +38,7 @@ public sealed class PaymentsDbContext(DbContextOptions<PaymentsDbContext> option
                 change.Sequence, status, payment.MerchantId, payment.CustomerId, payment.Amount,
                 payment.CapturedAmountMinor, payment.PspAuthorizationId, change.At);
             OutboxMessages.Add(new OutboxMessage(evt.EventId, Topics.Payments, payment.Id, evt.EventType,
-                JsonSerializer.Serialize(evt, EventJson), change.At));
+                JsonSerializer.Serialize(evt, PaymentEvent.Json), change.At));
         }
 
         var written = await base.SaveChangesAsync(ct);

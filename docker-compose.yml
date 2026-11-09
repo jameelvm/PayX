@@ -269,11 +269,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # Consumes payx.payments (7.3): the topics must exist first.
+      kafka-init:
+        condition: service_completed_successfully
     environment:
       <<: *service-env
       # Runtime as payx_ledger_app (SELECT/INSERT only); migrations as the owner (7.2).
       ConnectionStrings__Ledger: "Host=postgres;Port=5432;Database=payx_ledger;Username=payx_ledger_app;Password=payx_ledger_app_dev"
       ConnectionStrings__LedgerMigrations: "Host=postgres;Port=5432;Database=payx_ledger;Username=payx_ledger;Password=payx_ledger_dev"
+      Kafka__BootstrapServers: "kafka:9092"
 
   psp-simulator:
     <<: *service-base

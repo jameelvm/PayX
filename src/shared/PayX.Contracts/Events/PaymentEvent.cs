@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace PayX.Contracts.Events;
 
 /// <summary>Kafka topic names. One topic per aggregate (DESIGN decision 4).</summary>
@@ -35,4 +38,20 @@ public sealed record PaymentEvent(
 {
     /// <summary>"Authorized" → "payment.authorized".</summary>
     public static string TypeFor(string status) => $"payment.{status.ToLowerInvariant()}";
+
+    /// <summary>
+    /// The one way this event is written and read (7.3): camelCase, enums as
+    /// text. Shared here so producer (Payment's outbox) and consumers
+    /// (Ledger) can't drift apart; each used to need its own copy, and a
+    /// consumer that forgot camelCase would read every field as null.
+    /// Read-only, so no caller can change it for everyone else.
+    /// </summary>
+    public static readonly JsonSerializerOptions Json = CreateJson();
+
+    private static JsonSerializerOptions CreateJson()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
+        options.MakeReadOnly(populateMissingResolver: true);
+        return options;
+    }
 }

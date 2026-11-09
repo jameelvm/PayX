@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using PayX.Contracts.Events;
+using PayX.Ledger.Jobs;
 using PayX.Ledger.Repositories;
 using PayX.Ledger.Services;
 using PayX.ServiceDefaults;
@@ -16,6 +18,12 @@ builder.Services.AddDbContext<LedgerDbContext>(options => options
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<AccountRepository>();
 builder.Services.AddScoped<LedgerWriter>();
+
+// Transaction completion (7.3): every payment event is read from Kafka and
+// booked; the offset is committed only after the booking committed. Events
+// that can't be booked go to the dead-letter topic (6.6), so one bad event
+// never stops the rest of its partition.
+builder.AddDeadLetteringConsumer<PaymentEventHandler>(Topics.Payments, "payx-ledger", Topics.PaymentsDeadLetter);
 
 var app = builder.Build();
 
