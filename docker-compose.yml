@@ -271,7 +271,9 @@ services:
         condition: service_healthy
     environment:
       <<: *service-env
-      ConnectionStrings__Ledger: "Host=postgres;Port=5432;Database=payx_ledger;Username=payx_ledger;Password=payx_ledger_dev"
+      # Runtime as payx_ledger_app (SELECT/INSERT only); migrations as the owner (7.2).
+      ConnectionStrings__Ledger: "Host=postgres;Port=5432;Database=payx_ledger;Username=payx_ledger_app;Password=payx_ledger_app_dev"
+      ConnectionStrings__LedgerMigrations: "Host=postgres;Port=5432;Database=payx_ledger;Username=payx_ledger;Password=payx_ledger_dev"
 
   psp-simulator:
     <<: *service-base

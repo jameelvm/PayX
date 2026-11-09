@@ -20,10 +20,16 @@ builder.Services.AddScoped<LedgerWriter>();
 var app = builder.Build();
 
 // Local development only, as in Payment: production migrates in a separate
-// deploy step.
-using (var scope = app.Services.CreateScope())
+// deploy step. Migrations run as the tables' owner (LedgerMigrations); the
+// service itself uses payx_ledger_app (Ledger), which can only SELECT and
+// INSERT (7.2). Two credentials, so the one in every request's path can't
+// alter history even if the code tried.
+await using (var owner = new LedgerDbContext(new DbContextOptionsBuilder<LedgerDbContext>()
+    .UseNpgsql(builder.Configuration.GetConnectionString("LedgerMigrations")
+        ?? throw new InvalidOperationException("Missing configuration: ConnectionStrings:LedgerMigrations"))
+    .UseSnakeCaseNamingConvention().Options))
 {
-    await scope.ServiceProvider.GetRequiredService<LedgerDbContext>().Database.MigrateAsync();
+    await owner.Database.MigrateAsync();
 }
 
 app.MapPayXDefaults();
