@@ -21,6 +21,9 @@ builder.Services.AddAuthorization(options =>
     // Coarse, service-level rules only. Which role may call which endpoint
     // inside a service is that service's decision (Phase 4 onwards).
     options.AddPolicy("payments", p => p.RequireRole("Customer", "Merchant"));
+    // The books (7.6): customers and merchants read their own history and
+    // balance. Ops tools on the ledger come with reconciliation (Phase 8).
+    options.AddPolicy("ledger", p => p.RequireRole("Customer", "Merchant"));
 });
 
 builder.Services.AddReverseProxy()

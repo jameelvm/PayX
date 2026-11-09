@@ -136,6 +136,12 @@ namespace PayX.Ledger.Repositories.Migrations
                     b.HasIndex("PaymentId")
                         .HasDatabaseName("ix_journal_entries_payment_id");
 
+                    b.HasIndex("CustomerId", "Id")
+                        .HasDatabaseName("ix_journal_entries_customer_id_id");
+
+                    b.HasIndex("MerchantId", "Id")
+                        .HasDatabaseName("ix_journal_entries_merchant_id_id");
+
                     b.HasIndex("PaymentId", "Kind")
                         .IsUnique()
                         .HasDatabaseName("ix_journal_entries_one_per_step")

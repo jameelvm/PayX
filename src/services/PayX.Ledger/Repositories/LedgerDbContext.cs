@@ -60,6 +60,10 @@ public sealed class LedgerDbContext(DbContextOptions<LedgerDbContext> options) :
                 amount.Property(m => m.Currency).HasColumnName("currency").HasMaxLength(3).IsFixedLength();
             });
             entry.HasIndex(e => e.PaymentId);
+            // History (7.6): "this caller's entries, newest first, older than
+            // the cursor" is one backwards range scan on each of these.
+            entry.HasIndex(e => new { e.CustomerId, e.Id });
+            entry.HasIndex(e => new { e.MerchantId, e.Id });
             // Second line of dedupe (7.4), on the business key rather than the
             // event id: a payment is authorized, captured or voided at most
             // once, so even a replay carrying a new event id can't book the

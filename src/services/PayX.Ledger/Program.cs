@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using PayX.Contracts.Events;
 using PayX.Ledger.Jobs;
@@ -11,6 +12,12 @@ builder.AddPayXDefaults();
 // Ledger is ready only if it can reach its own database, payx_ledger.
 builder.AddPostgresReadiness("Ledger");
 
+// History and balances (7.6, 7.7) are per caller: the Ledger checks the
+// token itself (same rules as the Gateway, 2.4) and denies by default.
+builder.AddPayXJwtAuthentication();
+builder.Services.AddAuthorization(options =>
+    options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
+
 builder.Services.AddDbContext<LedgerDbContext>(options => options
     .UseNpgsql(builder.Configuration.GetConnectionString("Ledger"))
     .UseSnakeCaseNamingConvention());
@@ -19,6 +26,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<AccountRepository>();
 builder.Services.AddScoped<LedgerWriter>();
 builder.Services.AddScoped<BalanceAudit>();
+builder.Services.AddScoped<LedgerQueries>();
 
 // Transaction completion (7.3): every payment event is read from Kafka and
 // booked; the offset is committed only after the booking committed. Events
@@ -41,6 +49,9 @@ await using (var owner = new LedgerDbContext(new DbContextOptionsBuilder<LedgerD
     await owner.Database.MigrateAsync();
 }
 
+// Same order as the Gateway: error formatting first, so 401/403 have bodies.
 app.MapPayXDefaults();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.Run();
