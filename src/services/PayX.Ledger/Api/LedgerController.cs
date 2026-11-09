@@ -28,6 +28,17 @@ public sealed class LedgerController(LedgerQueries queries) : ControllerBase
         return Ok(await queries.HistoryAsync(CallerId, CallerView, from, to, before, limit, ct));
     }
 
+    /// <summary>
+    /// Doc ch.1: balance management, "available vs pending". A merchant gets
+    /// authorized / pending / available per currency; a customer what is on
+    /// hold on their card. From the stored balances, so one row per account.
+    /// </summary>
+    [HttpGet("balance"), Authorize(Roles = "Customer,Merchant")]
+    public async Task<IActionResult> Balance(CancellationToken ct) =>
+        CallerView == Viewer.Merchant
+            ? Ok(new { balances = await queries.MerchantBalancesAsync(CallerId, ct) })
+            : Ok(new { balances = await queries.CustomerBalancesAsync(CallerId, ct) });
+
     private Guid CallerId => Guid.Parse(User.FindFirst("sub")!.Value);
 
     // A user has one role (Identity, 2.2): a merchant's history is what they

@@ -15,6 +15,19 @@ public sealed record HistoryItem(long EntryId, string PaymentId, EntryKind Kind,
 public sealed record HistoryPage(IReadOnlyList<HistoryItem> Items, long? NextBefore);
 
 /// <summary>
+/// A merchant's money in one currency (7.7), in minor units, each never negative:
+/// <list type="bullet">
+/// <item><c>Authorized</c>: held on customers' cards, not captured yet. Not money yet: a void releases it.</item>
+/// <item><c>Pending</c>: captured, so owed to the merchant, but the PSP hasn't settled it, so not payable yet.</item>
+/// <item><c>Available</c>: settled, payable. Settlement moves pending here (Phase 8); until then it stays 0.</item>
+/// </list>
+/// </summary>
+public sealed record MerchantBalance(string Currency, long Authorized, long Pending, long Available);
+
+/// <summary>A customer's view (7.7): what is reserved on their card, per currency.</summary>
+public sealed record CustomerBalance(string Currency, long OnHold);
+
+/// <summary>
 /// Reads for people (7.6, 7.7). Doc ch.1 FRs: "transaction history" and
 /// "balance management". Read straight from the books, so what a customer
 /// sees is what the ledger holds, not a copy that could disagree with it.
@@ -55,4 +68,32 @@ public sealed class LedgerQueries(LedgerDbContext db)
         if (more) rows.RemoveAt(limit);
         return new HistoryPage(rows, more ? rows[^1].EntryId : null);
     }
+
+    /// <summary>
+    /// Doc ch.1: balance management. Read from the stored balances (7.5):
+    /// one row per account, whatever the history's length, and consistent
+    /// with it by construction because both commit together. A currency the
+    /// merchant has never been paid in doesn't appear.
+    /// </summary>
+    public async Task<IReadOnlyList<MerchantBalance>> MerchantBalancesAsync(Guid merchantId, CancellationToken ct)
+    {
+        var accounts = await db.Accounts.AsNoTracking()
+            .Where(a => a.OwnerId == merchantId && (a.Type == AccountType.MerchantAuthorized
+                || a.Type == AccountType.MerchantPending || a.Type == AccountType.MerchantAvailable))
+            .ToListAsync(ct);
+
+        long Of(IEnumerable<Account> inCurrency, AccountType type) =>
+            inCurrency.SingleOrDefault(a => a.Type == type)?.DisplayBalanceMinor ?? 0;
+
+        return accounts.GroupBy(a => a.Currency).OrderBy(g => g.Key)
+            .Select(g => new MerchantBalance(g.Key, Of(g, AccountType.MerchantAuthorized),
+                Of(g, AccountType.MerchantPending), Of(g, AccountType.MerchantAvailable)))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<CustomerBalance>> CustomerBalancesAsync(Guid customerId, CancellationToken ct) =>
+        (await db.Accounts.AsNoTracking()
+            .Where(a => a.OwnerId == customerId && a.Type == AccountType.CustomerHolds)
+            .OrderBy(a => a.Currency).ToListAsync(ct))
+        .Select(a => new CustomerBalance(a.Currency, a.DisplayBalanceMinor)).ToList();
 }
