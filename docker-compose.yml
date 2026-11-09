@@ -259,6 +259,20 @@ services:
       AWS__ServiceURL: "http://localstack:4566"
       Psp__BaseUrl: "http://payx-host:7088/"
 
+  # The books (Phase 7): double-entry journal + balances in payx_ledger.
+  ledger:
+    <<: *service-base
+    container_name: payx-ledger
+    build: { <<: *service-build, args: { SERVICE: Ledger } }
+    ports:
+      - "7085:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *service-env
+      ConnectionStrings__Ledger: "Host=postgres;Port=5432;Database=payx_ledger;Username=payx_ledger;Password=payx_ledger_dev"
+
   psp-simulator:
     <<: *service-base
     container_name: payx-psp-simulator
