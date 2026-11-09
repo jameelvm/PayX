@@ -14,6 +14,10 @@ public sealed class LedgerDbContext(DbContextOptions<LedgerDbContext> options) :
     public DbSet<Account> Accounts => Set<Account>();
     public DbSet<JournalEntry> JournalEntries => Set<JournalEntry>();
     public DbSet<Posting> Postings => Set<Posting>();
+    public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
+
+    /// <summary>One booking per payment step (7.4): see the partial unique index below.</summary>
+    public const string OneEntryPerStep = "ix_journal_entries_one_per_step";
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -54,6 +58,12 @@ public sealed class LedgerDbContext(DbContextOptions<LedgerDbContext> options) :
                 amount.Property(m => m.Currency).HasColumnName("currency").HasMaxLength(3).IsFixedLength();
             });
             entry.HasIndex(e => e.PaymentId);
+            // Second line of dedupe (7.4), on the business key rather than the
+            // event id: a payment is authorized, captured or voided at most
+            // once, so even a replay carrying a new event id can't book the
+            // same step twice. Partial: refunds (Phase 9) may repeat.
+            entry.HasIndex(e => new { e.PaymentId, e.Kind }).IsUnique()
+                .HasFilter("kind IN ('Authorization', 'Capture', 'Void')").HasDatabaseName(OneEntryPerStep);
 
             // Restrict, not EF's default cascade: nothing in a ledger is ever deleted.
             entry.HasMany(e => e.Postings).WithOne().HasForeignKey(p => p.EntryId).OnDelete(DeleteBehavior.Restrict);
@@ -73,6 +83,18 @@ public sealed class LedgerDbContext(DbContextOptions<LedgerDbContext> options) :
                 .HasPrincipalKey(a => new { a.Id, a.Currency })
                 .OnDelete(DeleteBehavior.Restrict);
             posting.HasIndex(p => new { p.AccountId, p.Id });   // an account's movements, in order
+        });
+
+        modelBuilder.Entity<ProcessedEvent>(processed =>
+        {
+            processed.ToTable("processed_events");
+            // The primary key is the dedupe: a second insert of the same
+            // event id fails, whichever transaction gets there second.
+            processed.HasKey(p => p.EventId);
+            processed.Property(p => p.EventId).ValueGeneratedNever();
+            processed.Property(p => p.PaymentId).HasMaxLength(40);
+            processed.Property(p => p.ProcessedAt).HasDefaultValueSql("now()");
+            processed.HasOne(p => p.Entry).WithMany().HasForeignKey(p => p.EntryId).OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

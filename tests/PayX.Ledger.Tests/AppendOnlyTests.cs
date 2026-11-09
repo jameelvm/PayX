@@ -73,8 +73,8 @@ public sealed class AppendOnlyTests
             EntryKind.Authorization, $"pay_{Guid.NewGuid():N}", customer, merchant, new Money(700, "USD"),
             DateTimeOffset.UtcNow, [
                 new Leg(new AccountKey(AccountType.CustomerHolds, customer, "USD"), 700),
-                new Leg(new AccountKey(AccountType.MerchantAuthorized, merchant, "USD"), -700)]), default);
-        return entry.Id;
+                new Leg(new AccountKey(AccountType.MerchantAuthorized, merchant, "USD"), -700)], Guid.NewGuid()), default);
+        return entry.Entry!.Id;
     }
 
     private static async Task Execute(string connectionString, string sql, long entryId)

@@ -86,11 +86,25 @@ public sealed class DeadLetteringConsumer<THandler>(
                 }).Build();
                 consumer.Subscribe(settings.Topic);
 
-                while (!ct.IsCancellationRequested)
+                try
                 {
-                    var result = consumer.Consume(ct);
-                    await ProcessAsync(result, ct);
-                    consumer.Commit(result);
+                    while (!ct.IsCancellationRequested)
+                    {
+                        var result = consumer.Consume(ct);
+                        await ProcessAsync(result, ct);
+                        consumer.Commit(result);
+                    }
+                }
+                finally
+                {
+                    // Leave the group on the way out (found in 7.4's replay
+                    // drill). Dispose alone just drops the connection: the
+                    // broker waits out the session timeout (~45 s) before
+                    // handing this instance's partitions to another, and
+                    // every deploy stalls them that long. Close() says
+                    // goodbye, so the rebalance starts at once. Nothing to
+                    // commit here: every handled message was committed above.
+                    consumer.Close();
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)

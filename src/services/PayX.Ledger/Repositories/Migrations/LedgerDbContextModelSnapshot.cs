@@ -130,6 +130,11 @@ namespace PayX.Ledger.Repositories.Migrations
                     b.HasIndex("PaymentId")
                         .HasDatabaseName("ix_journal_entries_payment_id");
 
+                    b.HasIndex("PaymentId", "Kind")
+                        .IsUnique()
+                        .HasDatabaseName("ix_journal_entries_one_per_step")
+                        .HasFilter("kind IN ('Authorization', 'Capture', 'Void')");
+
                     b.ToTable("journal_entries", null, t =>
                         {
                             t.HasCheckConstraint("ck_journal_entries_amount_positive", "amount_minor > 0");
@@ -184,6 +189,37 @@ namespace PayX.Ledger.Repositories.Migrations
                         });
                 });
 
+            modelBuilder.Entity("PayX.Ledger.Domain.ProcessedEvent", b =>
+                {
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("event_id");
+
+                    b.Property<long>("EntryId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("entry_id");
+
+                    b.Property<string>("PaymentId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("payment_id");
+
+                    b.Property<DateTimeOffset>("ProcessedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processed_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("EventId")
+                        .HasName("pk_processed_events");
+
+                    b.HasIndex("EntryId")
+                        .HasDatabaseName("ix_processed_events_entry_id");
+
+                    b.ToTable("processed_events", (string)null);
+                });
+
             modelBuilder.Entity("PayX.Ledger.Domain.Posting", b =>
                 {
                     b.HasOne("PayX.Ledger.Domain.JournalEntry", null)
@@ -200,6 +236,18 @@ namespace PayX.Ledger.Repositories.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_postings_accounts_account_id_currency");
+                });
+
+            modelBuilder.Entity("PayX.Ledger.Domain.ProcessedEvent", b =>
+                {
+                    b.HasOne("PayX.Ledger.Domain.JournalEntry", "Entry")
+                        .WithMany()
+                        .HasForeignKey("EntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_processed_events_journal_entries_entry_id");
+
+                    b.Navigation("Entry");
                 });
 
             modelBuilder.Entity("PayX.Ledger.Domain.JournalEntry", b =>

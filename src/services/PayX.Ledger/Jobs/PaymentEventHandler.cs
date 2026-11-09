@@ -51,8 +51,17 @@ public sealed class PaymentEventHandler(LedgerDbContext db, LedgerWriter writer,
             throw new MissingPredecessorException(
                 $"{e.EventType} for {e.PaymentId} arrived but its authorization is not in the ledger");
 
-        await writer.PostAsync(new EntryDraft(booking.Kind, e.PaymentId, e.CustomerId, e.MerchantId,
-            booking.Amount, e.OccurredAt, booking.Legs), ct);
+        var result = await writer.PostAsync(new EntryDraft(booking.Kind, e.PaymentId, e.CustomerId, e.MerchantId,
+            booking.Amount, e.OccurredAt, booking.Legs, e.EventId), ct);
+
+        // Neither is an error, and neither is retried: the books already hold
+        // this step, so acknowledging the message is exactly right (7.4).
+        if (result.Outcome == PostOutcome.Duplicate)
+            logger.LogInformation("Event {EventId} ({EventType}, {PaymentId}) was already booked; redelivery ignored",
+                e.EventId, e.EventType, e.PaymentId);
+        else if (result.Outcome == PostOutcome.StepAlreadyBooked)
+            logger.LogWarning("{EventType} for {PaymentId} is already booked under another event id; {EventId} ignored",
+                e.EventType, e.PaymentId, e.EventId);
     }
 
     /// <summary>

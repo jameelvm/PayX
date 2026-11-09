@@ -66,12 +66,12 @@ public sealed class DoubleEntryTests
             await Writer(db).PostAsync(new EntryDraft(EntryKind.Authorization, paymentId, customer, merchant,
                 new Money(5_000, "USD"), DateTimeOffset.UtcNow, [
                     Debit(AccountType.CustomerHolds, customer, 5_000),
-                    Credit(AccountType.MerchantAuthorized, merchant, 5_000)]), default);
+                    Credit(AccountType.MerchantAuthorized, merchant, 5_000)], Guid.NewGuid()), default);
             // A second entry for the same merchant reuses its account.
             await Writer(db).PostAsync(new EntryDraft(EntryKind.Void, paymentId, customer, merchant,
                 new Money(5_000, "USD"), DateTimeOffset.UtcNow, [
                     Credit(AccountType.CustomerHolds, customer, 5_000),
-                    Debit(AccountType.MerchantAuthorized, merchant, 5_000)]), default);
+                    Debit(AccountType.MerchantAuthorized, merchant, 5_000)], Guid.NewGuid()), default);
         }
 
         await using var check = LedgerDb.NewContext();
@@ -135,8 +135,9 @@ public sealed class DoubleEntryTests
         var entry = await Writer(db).PostAsync(new EntryDraft(EntryKind.Authorization, $"pay_{Guid.NewGuid():N}",
             customer, merchant, new Money(100, "USD"), DateTimeOffset.UtcNow, [
                 Debit(AccountType.CustomerHolds, customer, 100),
-                Credit(AccountType.MerchantAuthorized, merchant, 100)]), default);
-        return (entry.Id, entry.Postings[0].AccountId, entry.Postings[1].AccountId);
+                Credit(AccountType.MerchantAuthorized, merchant, 100)], Guid.NewGuid()), default);
+        var booked = entry.Entry!;
+        return (booked.Id, booked.Postings[0].AccountId, booked.Postings[1].AccountId);
     }
 
     // Raw SQL in one transaction: what a buggy code path or a hand-typed fix would do.
