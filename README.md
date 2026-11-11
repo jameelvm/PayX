@@ -910,3 +910,134 @@ resolver gets the bank's real answer. Consumers can't be blocked by one bad
 message. What is still missing is the consumer itself: Phase 7 builds the
 Ledger, which books these events into a double-entry journal, dedupes them,
 and keeps merchant balances.
+
+## Phase 7 — Ledger and wallets
+
+**What the phase delivers:** the books. Every payment event from Phase 6 is
+booked into a double-entry, append-only journal; balances (the doc's
+"wallet") change in the same transaction as the postings they sum; customers
+and merchants read their history and balances from those books. The doc's
+rule "a message is only marked as consumed after the transaction is …
+recorded in the wallet and ledger" is now real end to end. Full design,
+diagrams, scenarios and findings: [`docs/LEDGER.md`](docs/LEDGER.md).
+
+```
+ Kafka payx.payments ─► Ledger consumer (group payx-ledger, dead-lettering loop)
+      │                     └─[ one transaction: lock accounts ─► entry + postings (sum 0)
+      │                                          ─► balances += postings ─► processed_events ]
+      │                     └─► then commit the offset
+      └ can't book ─► payx.payments.dlq
+ GET /api/ledger/transactions · GET /api/ledger/balance ─► the same tables, per caller
+```
+
+### 7.1 Double entry
+
+**Built:** new service `PayX.Ledger` (7085, `payx_ledger`). Accounts per
+(type, owner, currency): `PspClearing`, `MerchantPending`,
+`MerchantAvailable`, and memo accounts `CustomerHolds` /
+`MerchantAuthorized` for holds. A journal entry = signed postings summing
+to zero per currency, checked by `JournalEntry.EnsureBalanced` and by a
+deferred constraint trigger at COMMIT; a composite FK keeps each posting
+in its account's currency.
+
+**Why:** money can't appear or vanish unnoticed; if a bug tries, the sum
+isn't zero and the database refuses, whoever wrote the SQL.
+
+**Verify:** raw SQL +5,000 / −4,999 → refused at commit (`ck_entry_balanced`).
+
+### 7.2 Append-only
+
+**Built:** trigger `ledger_refuse_change` refuses UPDATE / DELETE /
+TRUNCATE on the journal for every role, owner included; the service runs as
+`payx_ledger_app` (SELECT/INSERT), migrations as the owner.
+
+**Why:** the doc's "immutable entry … auditable trail". Two locks because
+the owner can disable a trigger, and grants alone protect nothing from the
+owner. Corrections are reversing entries (Phase 9).
+
+**Verify:** app role UPDATE → `permission denied`; owner UPDATE →
+`restrict_violation` from the trigger.
+
+**Talking point:** "enforced in the database, not just by convention" means
+the credential in every request's path can't change history even if the
+code (or an injected statement) tries.
+
+### 7.3 Consumer
+
+**Built:** `PaymentEventHandler` inside the 6.6 `DeadLetteringConsumer`.
+`PostingRules` (pure): Authorized → hold; Captured → release the whole hold
+and book the captured amount (PSP owes us / we owe the merchant); Voided →
+release. Events are validated (missing fields, unknown currency, captured >
+authorized → poison). A capture without a booked authorization is parked,
+never guessed. `PaymentEvent.Json` is now shared by producer and consumer.
+
+**Why:** commit the offset only after the booking commits: at least once.
+
+**Verify:** the new group booked all 1,776 retained events, lag 0, DLQ
+empty, every entry balanced; a $50 auth / $30 capture matches exactly.
+
+### 7.4 Idempotent consumer
+
+**Built:** `processed_events` (event id, payment, entry) inserted in the
+same transaction as the entry; a partial unique index allows one
+Authorization / Capture / Void per payment.
+
+**Why:** at least once means duplicates are certain. The inbox catches a
+redelivery (and a race: the primary key lets one of two commit); the
+business key catches a replay with a new event id.
+
+**Verify:** offsets reset to earliest and the topic replayed twice: entries
+674 before and after, 0 duplicate steps.
+
+**Found:** the 6.6 loop never called `Close()`, so every stop left the
+group rebalancing for ~45 s (the reset was refused). Fixed.
+
+### 7.5 Balances in the same transaction
+
+**Built:** `accounts.balance_minor`, updated next to the postings after
+locking the accounts `FOR UPDATE` in id order; column grant `UPDATE
+(balance_minor)` only. `BalanceAudit`: balance ≠ postings, and the trial
+balance per currency (must be 0).
+
+**Why:** decision 10, a deliberate deviation from the doc, whose
+wallet-then-ledger is two writes a crash can split. The lock prevents lost
+updates; the order prevents deadlocks.
+
+**Verify:** without the lock, 25 concurrent $10 captures to one merchant
+left **$50 instead of $250**; with it, exact. Live: 0 mismatches, trial
+balance 0.
+
+### 7.6 getTransactionHistory
+
+**Built:** `GET /api/ledger/transactions`: the caller's own entries, newest
+first, optional `from`/`to`, keyset paging (`before` / `nextBefore`). JWT
+validated by the Ledger itself; Gateway route `/api/ledger/**`.
+
+**Why:** keyset paging costs the same on page 500 as on page 1 and can't
+skip or repeat rows while new bookings land.
+
+**Verify:** customer and merchant both see Capture 30.00, Authorization
+50.00; another merchant sees nothing; no token 401.
+
+### 7.7 Balance API
+
+**Built:** `GET /api/ledger/balance`: merchant `authorized` / `pending` /
+`available` per currency, customer `onHold`, from the stored balances.
+
+**Why:** the doc's "available vs pending": captured money isn't payable
+until the PSP settles it (Phase 8 moves pending → available).
+
+**Verify:** pay $50, capture $30 → merchant 0 / 30.00 / 0, customer 0 on hold.
+
+### Phase 7 in one paragraph
+
+Payment events now land in books that can't lie: every entry balances to
+the cent (checked again by the database at commit), nothing in history can
+be changed by anyone, and every balance moves in the same transaction as the
+postings it sums, under a lock, so it equals its history by construction.
+The consumer acknowledges an event only after the booking commits and books
+each event exactly once however often Kafka delivers it, which a full
+replay of the topic proved. Customers and merchants read history and
+balances straight from those books. What the ledger can't know yet is
+whether the PSP agrees: Phase 8 brings the settlement file, moves pending
+money to available, and reconciles the books against the PSP's own record.

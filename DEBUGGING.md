@@ -18,6 +18,7 @@ Every service has **two homes on the same port**:
 | Payment | 7082 | `payment` | `Payment (local)` |
 | Risk | 7083 | `risk` | `Risk (local)` |
 | Vault | 7084 | `vault` | `Vault (local)` |
+| Ledger | 7085 | `ledger` | `Ledger (local)` |
 | PSP simulator | 7088 | `psp-simulator` | `PspSimulator (local)` |
 
 Infrastructure is always a container and never moves: Postgres `5434`,
@@ -82,7 +83,7 @@ the fastest way to see that a request went to the container, not to you.
 |---|---|---|
 | **Test console** | `http://localhost:7080/console/` (Development) | A web page with a button for every scenario: create users, enter a card, pay, double-click, reuse a key, status as each user, capture. Logs every request and answer with `X-PayX-Instance` and `Idempotent-Replayed`. Served by the Gateway, so everything goes through it. |
 | **`PayX.http`** | repo root; open in Visual Studio | Every scenario from [`docs/PAYMENT-CORE.md`](docs/PAYMENT-CORE.md), in order. Logs in, keeps the tokens and ids from earlier answers. Needs Visual Studio 17.12 or later (request variables). |
-| **Scalar** | `http://localhost:7081/scalar` (Identity), `:7082/scalar` (Payment), `:7084/scalar` (Vault), `:7088/scalar` (PSP) | A page per service to send requests from the browser. Paste an access token into **Authentication → Bearer** once. Endpoints that need an `Idempotency-Key` show it as a required header. Development only. |
+| **Scalar** | `http://localhost:7081/scalar` (Identity), `:7082/scalar` (Payment), `:7084/scalar` (Vault), `:7085/scalar` (Ledger), `:7088/scalar` (PSP) | A page per service to send requests from the browser. Paste an access token into **Authentication → Bearer** once. Endpoints that need an `Idempotency-Key` show it as a required header. Development only. |
 | curl | anywhere | examples in [`RUNNING.md`](RUNNING.md) |
 
 Scalar talks to a service directly, bypassing the Gateway. `PayX.http` goes
@@ -127,7 +128,10 @@ services you want to step through.
 | Retries (6.3) | Vault or Payment | `CardAuthorizer.AuthorizeAsync` / `PspClient.CaptureAsync`; Polly logs each `Execution attempt` | breakpoints in the PSP simulator's `Authorize` hit once per attempt, each with the same `Idempotency-Key` |
 | Unknown (6.4) | Payment | `PaymentAuthorization.AuthorizeAsync` → the `StatusCode == 504` branch; `IdempotentAttribute` (202 not stored) | `payment.Status` after `MarkUnknown` |
 | Resolver (6.5) | Payment | `Services/StuckPaymentResolver.cs` → `FindStuckAsync`, `ResolveAsync` | lower `Resolver:GracePeriod` / `Interval` locally to hit it sooner |
-| Dead letters (6.6) | a consumer (Ledger, 7.3) | `ServiceDefaults/Kafka/DeadLetteringConsumer.cs` → `ProcessAsync`, `DeadLetterAsync` | the attempt count; the DLQ headers |
+| Dead letters (6.6) | Ledger | `ServiceDefaults/Kafka/DeadLetteringConsumer.cs` → `ProcessAsync`, `DeadLetterAsync` | the attempt count; the DLQ headers |
+| Booking an event (7.3) | Ledger | `Jobs/PaymentEventHandler.cs` → `HandleAsync`, `Read`; `Domain/PostingRules.cs` → `For` | the legs for the event's status; a capture's missing-predecessor check |
+| One transaction (7.4–7.5) | Ledger | `Services/LedgerWriter.cs` → `PostAsync`; `Repositories/AccountRepository.cs` → `LockAsync` | `PostOutcome` (Posted / Duplicate / StepAlreadyBooked); balances before and after `Apply`. Paused inside `PostAsync`, a second Ledger booking the same account waits on the row lock |
+| History and balance (7.6–7.7) | Ledger | `Services/LedgerQueries.cs` → `HistoryAsync`, `MerchantBalancesAsync` | the caller id from `sub`; `nextBefore` |
 | Risk outage (5.6–5.7) | Payment | `RiskClient.CheckAsync`: the `BrokenCircuitException` and `TimeoutRejectedException` catches; `FallbackRiskCheck` the threshold check | pausing in Risk itself trips Payment's 2 s timeout: debug Risk with `Risk:Timeout` raised in Payment's settings |
 | Token checks | Payment or Gateway | ServiceDefaults `JwtAuthenticationExtensions.cs` (configuration); add `options.Events` there to break on `OnAuthenticationFailed` | `User.FindFirst("sub")` in the controllers |
 
