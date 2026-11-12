@@ -1,0 +1,15 @@
+{
+  "profiles": {
+    // Same port the container publishes (7085): docker compose stop ledger
+    // first, or this fails to bind. See DEBUGGING.md.
+    "Ledger (local)": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "launchUrl": "scalar",
+      "applicationUrl": "http://localhost:7085",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}

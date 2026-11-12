@@ -37,5 +37,20 @@
         "DebugTarget": "Payment (local)"
       }
     ]
+  },
+  {
+    "Name": "Payment + Ledger",
+    "Projects": [
+      {
+        "Path": "src\\services\\PayX.Ledger\\PayX.Ledger.csproj",
+        "Action": "Start",
+        "DebugTarget": "Ledger (local)"
+      },
+      {
+        "Path": "src\\services\\PayX.Payment\\PayX.Payment.csproj",
+        "Action": "Start",
+        "DebugTarget": "Payment (local)"
+      }
+    ]
   }
 ]

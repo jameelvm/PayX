@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 42 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 49 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -67,7 +67,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 4 | [Payment core](#phase-4-payment-core) | payment service, idempotency | 9 / 9 | ✅ |
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 7 / 7 | ✅ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 6 / 6 | ✅ |
-| 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 0 / 7 | ⬜ |
+| 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 7 / 7 | ✅ |
 | 8 | [Settlement + Reconciliation](#phase-8-settlement--reconciliation) | reconciliation system | 0 / 4 | ⬜ |
 | 9 | [Refunds + disputes](#phase-9-refunds--disputes) | dispute management | 0 / 3 | ⬜ |
 | 10 | [Frontend](#phase-10-frontend) | merchant's online store, mobile access | 0 / 5 | ⬜ |
@@ -154,13 +154,13 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 
 | | Module | What it builds | Concept |
 |---|---|---|---|
-| ⬜ | 7.1 | Accounts + journal + postings; sum-to-zero check | double-entry |
-| ⬜ | 7.2 | Append-only enforcement (trigger + grants) | immutability |
-| ⬜ | 7.3 | Kafka consumer; commit offset after the DB commit | at-least-once delivery |
-| ⬜ | 7.4 | Consumer dedupe (`processed_events`) | idempotent consumers |
-| ⬜ | 7.5 | Balances updated in the same transaction (wallet) | consistent projections |
-| ⬜ | 7.6 | `getTransactionHistory` | history |
-| ⬜ | 7.7 | Balance API (available vs pending) | balance management |
+| ✅ | 7.1 | Accounts + journal + postings; sum-to-zero check | double-entry |
+| ✅ | 7.2 | Append-only enforcement (trigger + grants) | immutability |
+| ✅ | 7.3 | Kafka consumer; commit offset after the DB commit | at-least-once delivery |
+| ✅ | 7.4 | Consumer dedupe (`processed_events`) | idempotent consumers |
+| ✅ | 7.5 | Balances updated in the same transaction (wallet) | consistent projections |
+| ✅ | 7.6 | `getTransactionHistory` | history |
+| ✅ | 7.7 | Balance API (available vs pending) | balance management |
 
 ### Phase 8: Settlement + Reconciliation
 
@@ -209,7 +209,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 
 ## Current state
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-09 — **Phase 7 (Ledger + wallets) complete**; see *Next up* for the per-module record. The per-phase notes below run oldest first.
 **Phase 0 — design. Draft written, awaiting owner review.** Source PDFs read
 (the schema/detailed-design figures are blank in the PDF export, so the
 storage schema in `DESIGN.md` is inferred from the APIs and text). Stack,
@@ -665,8 +665,90 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 7, Module 7.1 — accounts + journal + postings.** First confirm
-decision 10 (wallet balances inside Ledger), deferred to the start of Phase 7.
+**Phase 8, Module 8.1 — the PSP simulator writes the end-of-day settlement
+file to S3** (`payx-settlement-files`). Then 8.2 parse it, 8.3 match it
+against the ledger, 8.4 classify discrepancies. Settlement is also what
+fills `MerchantAvailable` (pending → available), which 7.7's balance API
+already shows as 0.
+
+**Phase 7 complete (2026-11-09): all seven modules committed; wrap-up done**
+— `docs/LEDGER.md` (model, diagrams, 13 scenarios, findings, repair query),
+README Phase 7 section, DESIGN (decisions 9 and 10 accepted, 22 clarified,
+new 34–39; ledger schema as built; 9 failure-mode rows; 7 Q&A; open
+questions; 5 doc-to-code rows), RUNNING (Ledger, role upgrade script,
+drills incl. full replay), DEBUGGING (port 7085, breakpoints, "Payment +
+Ledger" launch profile). Owner chose decision 10 = balances inside Ledger,
+same transaction, and asked for the whole phase in one go (commit per
+module, document at the end), 2026-11-09. Built in worktree branch
+`worktree-phase-7-ledger`. Tests: Ledger 56, whole solution 305, 0 warnings.
+Open from Phase 7 (DESIGN §4): available filled by settlement (Phase 8),
+fees account, `processed_events` pruning, hot `PspClearing` row, ops
+endpoint for `BalanceAudit`, ordered replay of parked events, multi-seller
+split, schema registry. **Flaky test seen once (pre-existing, Phase 6):**
+`PspRetryTests.Waits_between_attempts_grow_and_vary` failed in one full run
+and passed 15/15 alone: Polly's jittered waits can fall under its 20 ms
+floor (base 100 ms). Loosen the floor or seed the jitter.
+
+7.1 done (2026-11-09): new service `PayX.Ledger` (7085, compose `ledger`,
+profile "Ledger (local)", Dockerfile restore line). Accounts unique per
+(type, owner, currency), opened on first use (`INSERT … ON CONFLICT DO
+NOTHING`): PspClearing (system = Guid.Empty), MerchantPending,
+MerchantAvailable, memo CustomerHolds / MerchantAuthorized. Journal entry =
+signed postings (+ debit / − credit) summing to 0 per currency:
+`JournalEntry.EnsureBalanced` and deferred constraint triggers
+`ck_entry_balanced` (postings) / `ck_entry_has_postings` (entries); composite
+FK (account_id, currency); Restrict on delete. Ledger tests 9/9.
+
+7.2 done (2026-11-09): trigger `ledger_refuse_change` (UPDATE/DELETE/TRUNCATE
+on journal_entries and postings, DELETE/TRUNCATE on accounts;
+restrict_violation). New role `payx_ledger_app` (init script + idempotent
+`infra/postgres/upgrade/07-ledger-app-role.sql`, applied to the local
+volume): SELECT/INSERT only; migrations run as the owner via
+`ConnectionStrings:LedgerMigrations`. Ledger tests 21/21.
+
+7.3 done (2026-11-09): `Jobs/PaymentEventHandler` in the 6.6
+`DeadLetteringConsumer` (group `payx-ledger`); `Domain/PostingRules`
+(Authorized → hold; Captured → release whole hold + PspClearing/
+MerchantPending for the captured amount; Voided → release; others nothing;
+unknown statuses skipped with a warning); validation on read →
+PoisonMessageException; missing predecessor → MissingPredecessorException
+(retried, then DLQ). `PaymentEvent.Json` moved to Contracts and used by
+Payment's outbox. Live: 1,776 retained events booked, lag 0, DLQ empty,
+all balanced; pay_01a1bedc… ($50 auth / $30 capture) matches.
+
+7.4 done (2026-11-09): `processed_events` (PK event id, payment, entry FK)
+in the entry's transaction; partial unique index
+`ix_journal_entries_one_per_step`; `PostOutcome` Posted / Duplicate /
+StepAlreadyBooked (last two acknowledged, not retried). **Found and fixed:**
+`DeadLetteringConsumer` never called `Close()` → a stopped instance stayed
+in the group ~45 s (offset reset refused); now `Close()` in a finally.
+Live: group reset to earliest, topic replayed twice: 0 duplicate steps,
+674 entries before and after. Ledger tests 43/43.
+
+7.5 done (2026-11-09): `accounts.balance_minor` (backfilled from postings);
+`LedgerWriter.PostAsync` = one explicit transaction: dedupe check →
+`AccountRepository.LockAsync` (`FOR UPDATE`, id order; tracked accounts
+detached first) → entry + postings → `Apply` → processed_events → commit.
+Column grant `UPDATE (balance_minor)`. `Services/BalanceAudit` (mismatches,
+trial balance). Without the lock: 25 concurrent captures → 5,000 instead of
+25,000 (dev drift repaired from postings; query in docs/LEDGER.md). TRUNCATE
+tests moved to a serial collection (40P01 beside row locks). Live: 0
+mismatches, USD trial balance 0. Ledger tests 48/48.
+
+7.6 done (2026-11-09): `GET /api/ledger/transactions` (`LedgerQueries.
+HistoryAsync`): own entries newest first, from/to, keyset `before` /
+`nextBefore`, limit 1–100; indexes (customer_id, id), (merchant_id, id).
+Ledger validates JWTs (deny by default); Gateway route `/api/ledger/**`,
+policy `ledger`, cluster `ledger` → 7085. Live through the Gateway: both
+parties see Capture 30.00 / Authorization 50.00, another merchant nothing,
+401 without a token, 400 for from ≥ to. The TRUNCATE test also deadlocked
+with the live container during a full test run (Postgres log); it now
+retries a deadlock. Ledger tests 52/52.
+
+7.7 done (2026-11-09): `GET /api/ledger/balance`: merchant authorized /
+pending / available per currency, customer onHold, from stored balances.
+Live: pay $50, capture $30 → merchant 0 / 3000 / 0, customer 0. Ledger
+tests 56/56.
 
 **Phase 6 complete (2026-11-08): all six modules committed; wrap-up done** —
 `docs/RELIABILITY.md` (design + diagrams + 15 scenarios), README Phase 6

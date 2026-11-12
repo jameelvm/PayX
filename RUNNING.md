@@ -201,9 +201,50 @@ docker exec payx-postgres psql -U payx_payments -d payx_payments \
 | Bank blip | `docker pause payx-psp-simulator`, pay, `docker unpause` within ~3 s | 201 after a retry (Vault logs `Execution attempt`) |
 | Bank silent | `docker pause payx-psp-simulator`, pay, wait > 10 s | 202 `Unknown`; after `docker unpause`, the same key → the bank's answer |
 | Nobody comes back | `docker compose stop psp-simulator`, pay (502), `docker compose start psp-simulator`, wait 60–75 s | status `Failed` (or `Authorized` if the PSP did hold it): the resolver |
-| Dead letters | (no consumer yet: Ledger, 7.3) | Kafka UI → `payx.payments.dlq`, headers `dlq-*` |
+| Dead letters | publish a malformed message to `payx.payments` from Kafka UI | the Ledger dead-letters it: Kafka UI → `payx.payments.dlq`, headers `dlq-*` |
 
 New statuses: `Unknown` (answered 202 Accepted) and `Failed`.
+
+### Ledger (Phase 7)
+
+The Ledger (7085) books every payment event from Kafka into a double-entry
+journal and keeps balances. It needs Postgres and Kafka (`kafka-init`
+done), and the database role `payx_ledger_app`: a data volume created
+before Phase 7 needs it added once (idempotent):
+
+```bash
+docker exec -i payx-postgres psql -U payx_admin -d payx_admin < infra/postgres/upgrade/07-ledger-app-role.sql
+docker compose up -d --build ledger gateway
+```
+
+Full design: [`docs/LEDGER.md`](docs/LEDGER.md).
+
+```bash
+# history and balances, through the Gateway, as the customer ($TOKEN) or the merchant ($MTOKEN)
+curl -s localhost:7080/api/ledger/transactions -H "Authorization: Bearer $TOKEN"
+curl -s "localhost:7080/api/ledger/transactions?limit=5&before=<nextBefore>" -H "Authorization: Bearer $MTOKEN"
+curl -s localhost:7080/api/ledger/balance -H "Authorization: Bearer $MTOKEN"
+# after pay $50 + capture $30: merchant {"authorized":0,"pending":3000,"available":0}, customer {"onHold":0}
+
+# the books in psql (read-only role is enough)
+docker exec payx-postgres psql -U payx_ledger_app -d payx_ledger \
+  -c "select e.id, e.kind, e.payment_id, a.type, p.amount_minor from journal_entries e join postings p on p.entry_id = e.id join accounts a on a.id = p.account_id order by e.id desc, p.id limit 12"
+# audits: accounts whose balance differs from their postings (expect none), trial balance (expect 0)
+docker exec payx-postgres psql -U payx_ledger_app -d payx_ledger \
+  -c "select a.id from accounts a left join postings p on p.account_id = a.id group by a.id, a.balance_minor having a.balance_minor <> coalesce(sum(p.amount_minor), 0)" \
+  -c "select currency, sum(balance_minor) from accounts group by currency"
+```
+
+| Drill | Do | Expect |
+| --- | --- | --- |
+| Lag | Kafka UI → Consumers → `payx-ledger` | lag 0 a second after a payment |
+| Edit history | as `payx_ledger_app`: `update postings set amount_minor = 1` | `permission denied`; as the owner `payx_ledger`: `the ledger is append-only` |
+| Ledger down | `docker compose stop ledger`, pay and capture, `docker compose start ledger` | payments unaffected; the Ledger books the backlog on start |
+| Replay everything | stop the Ledger; `kafka-consumer-groups.sh --bootstrap-server kafka:9092 --group payx-ledger --topic payx.payments --reset-offsets --to-earliest --execute` (in `payx-kafka`, `MSYS_NO_PATHCONV=1` from Git Bash); start it | entry count unchanged; logs `redelivery ignored` / `already booked under another event id` |
+
+The reset is refused while the group has members ("group is not
+inactive"): stop the Ledger first. Since 7.4 a stopped Ledger leaves the
+group at once; before that fix it took ~45 s.
 
 ## 4. Tests
 
@@ -220,6 +261,7 @@ than one that fails.
 so Postgres must be up too (Module 4.1).
 `PayX.Risk.Tests` include Redis tests (velocity, 5.2): Redis must be up.
 `PayX.Payment.Tests` include Kafka tests (relay 6.2, dead-letter consumer 6.6): Kafka must be up (`docker compose up -d kafka kafka-init`).
+`PayX.Ledger.Tests` run against `payx_ledger` as both roles (owner for migrations, `payx_ledger_app` for everything else): Postgres up and the 7.2 role created. Stop the `ledger` container before running tests that add a migration: an old Ledger booking against a newer schema can leave rows the new code expects (7.5's balances).
 
 ## Windows / Git Bash notes
 

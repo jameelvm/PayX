@@ -50,3 +50,11 @@ REVOKE CONNECT ON DATABASE payx_ledger   FROM PUBLIC;
 REVOKE CONNECT ON DATABASE payx_recon    FROM PUBLIC;
 REVOKE CONNECT ON DATABASE payx_disputes FROM PUBLIC;
 REVOKE CONNECT ON DATABASE payx_psp      FROM PUBLIC;
+
+-- Ledger's runtime role (Module 7.2). payx_ledger owns the tables and runs
+-- the migrations; the service itself logs in as payx_ledger_app, which the
+-- migrations grant SELECT/INSERT on the journal and nothing more. The owner
+-- could disable the append-only trigger; this role can't even UPDATE.
+-- Existing volumes: infra/postgres/upgrade/07-ledger-app-role.sql.
+CREATE ROLE payx_ledger_app LOGIN PASSWORD 'payx_ledger_app_dev';
+GRANT CONNECT ON DATABASE payx_ledger TO payx_ledger_app;

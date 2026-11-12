@@ -189,6 +189,7 @@ services:
       ReverseProxy__Clusters__payment__Destinations__payment-1__Address: "http://payx-host:7082/"
       ReverseProxy__Clusters__payment__Destinations__payment-2__Address: "http://payx-host:7092/"
       ReverseProxy__Clusters__identity__Destinations__identity-1__Address: "http://payx-host:7081/"
+      ReverseProxy__Clusters__ledger__Destinations__ledger-1__Address: "http://payx-host:7085/"
       # Development only (appsettings.Development.json): the test console's card entry.
       ReverseProxy__Clusters__vault__Destinations__vault-1__Address: "http://payx-host:7084/"
 
@@ -258,6 +259,26 @@ services:
       ConnectionStrings__Redis: "redis:6379,abortConnect=false"
       AWS__ServiceURL: "http://localstack:4566"
       Psp__BaseUrl: "http://payx-host:7088/"
+
+  # The books (Phase 7): double-entry journal + balances in payx_ledger.
+  ledger:
+    <<: *service-base
+    container_name: payx-ledger
+    build: { <<: *service-build, args: { SERVICE: Ledger } }
+    ports:
+      - "7085:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # Consumes payx.payments (7.3): the topics must exist first.
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *service-env
+      # Runtime as payx_ledger_app (SELECT/INSERT only); migrations as the owner (7.2).
+      ConnectionStrings__Ledger: "Host=postgres;Port=5432;Database=payx_ledger;Username=payx_ledger_app;Password=payx_ledger_app_dev"
+      ConnectionStrings__LedgerMigrations: "Host=postgres;Port=5432;Database=payx_ledger;Username=payx_ledger;Password=payx_ledger_dev"
+      Kafka__BootstrapServers: "kafka:9092"
 
   psp-simulator:
     <<: *service-base
