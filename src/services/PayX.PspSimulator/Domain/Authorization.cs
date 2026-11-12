@@ -36,6 +36,13 @@ public sealed class Authorization
     public DateTimeOffset? CapturedAt { get; private set; }
 
     /// <summary>
+    /// Which settlement batch paid this charge out (8.1). null = captured but
+    /// not paid out yet. Set once, by <c>Settler</c>, and never changed: a
+    /// charge belongs to exactly one batch, so it is never paid twice.
+    /// </summary>
+    public string? SettlementBatchId { get; private set; }
+
+    /// <summary>
     /// Concurrency token, mapped to Postgres's hidden <c>xmin</c> column (the
     /// id of the transaction that last wrote the row). EF adds
     /// "WHERE xmin = &lt;value I read&gt;" to every UPDATE, so if anyone changed

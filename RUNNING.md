@@ -246,6 +246,26 @@ The reset is refused while the group has members ("group is not
 inactive"): stop the Ledger first. Since 7.4 a stopped Ledger leaves the
 group at once; before that fix it took ~45 s.
 
+### Settlement (Phase 8)
+
+The PSP simulator pays out captured charges every **2 minutes** (a real PSP
+does it once a day) and writes a settlement file to S3. Full explanation:
+`docs/SETTLEMENT.md`.
+
+It needs LocalStack running. After changing its code, rebuild it:
+`docker compose up -d --build psp-simulator`.
+
+```bash
+# 1. pay and capture (see "Paying end to end" above)
+# 2. wait up to 2 minutes, then:
+docker logs payx-psp-simulator 2>&1 | grep Settlement
+docker exec payx-localstack awslocal s3 ls s3://payx-settlement-files/settlements/ --recursive
+docker exec payx-localstack awslocal s3 cp s3://payx-settlement-files/<key> -
+# a $100 capture shows: ...,capture,10000,320,9680,USD,...  (fee 2.9% + 30¢)
+```
+
+Change how often it runs in `appsettings.json` → `Settlement:Interval`.
+
 ## 4. Tests
 
 ```bash

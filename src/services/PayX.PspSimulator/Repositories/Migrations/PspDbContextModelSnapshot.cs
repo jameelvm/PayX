@@ -90,6 +90,11 @@ namespace PayX.PspSimulator.Repositories.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("reference");
 
+                    b.Property<string>("SettlementBatchId")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("settlement_batch_id");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -105,8 +110,15 @@ namespace PayX.PspSimulator.Repositories.Migrations
                     b.HasKey("Id")
                         .HasName("pk_authorizations");
 
+                    b.HasIndex("CapturedAt")
+                        .HasDatabaseName("ix_authorizations_unsettled")
+                        .HasFilter("status = 'Captured' AND settlement_batch_id IS NULL");
+
                     b.HasIndex("Reference")
                         .HasDatabaseName("ix_authorizations_reference");
+
+                    b.HasIndex("SettlementBatchId")
+                        .HasDatabaseName("ix_authorizations_settlement_batch_id");
 
                     b.HasIndex("CardFingerprint", "Status")
                         .HasDatabaseName("ix_authorizations_card_fingerprint_status");
@@ -167,6 +179,53 @@ namespace PayX.PspSimulator.Repositories.Migrations
                     b.ToTable("idempotency_keys", (string)null);
                 });
 
+            modelBuilder.Entity("PayX.PspSimulator.Domain.SettlementBatch", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("id");
+
+                    b.Property<DateOnly>("BusinessDate")
+                        .HasColumnType("date")
+                        .HasColumnName("business_date");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset>("CutoffAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("cutoff_at");
+
+                    b.Property<int>("LineCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("line_count");
+
+                    b.Property<string>("ObjectKey")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("object_key");
+
+                    b.Property<DateTimeOffset?>("UploadedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("uploaded_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_settlement_batches");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("ix_settlement_batches_not_uploaded")
+                        .HasFilter("uploaded_at IS NULL");
+
+                    b.HasIndex("ObjectKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_settlement_batches_object_key");
+
+                    b.ToTable("settlement_batches", (string)null);
+                });
+
             modelBuilder.Entity("PayX.PspSimulator.Domain.Authorization", b =>
                 {
                     b.HasOne("PayX.PspSimulator.Domain.CardAccount", null)
@@ -175,6 +234,12 @@ namespace PayX.PspSimulator.Repositories.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_authorizations_card_accounts_card_fingerprint");
+
+                    b.HasOne("PayX.PspSimulator.Domain.SettlementBatch", null)
+                        .WithMany()
+                        .HasForeignKey("SettlementBatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_authorizations_settlement_batches_settlement_batch_id");
                 });
 #pragma warning restore 612, 618
         }

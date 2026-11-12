@@ -12,9 +12,23 @@ public sealed class PspDbContext(DbContextOptions<PspDbContext> options) : DbCon
     public DbSet<CardAccount> CardAccounts => Set<CardAccount>();
     public DbSet<Authorization> Authorizations => Set<Authorization>();
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
+    public DbSet<SettlementBatch> SettlementBatches => Set<SettlementBatch>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<SettlementBatch>(batch =>
+        {
+            batch.ToTable("settlement_batches");
+            batch.HasKey(b => b.Id);
+            batch.Property(b => b.Id).HasMaxLength(40);
+            batch.Property(b => b.ObjectKey).HasMaxLength(128);
+            batch.HasIndex(b => b.ObjectKey).IsUnique();
+            // "Which files still need uploading?" (crash between commit and upload).
+            batch.HasIndex(b => b.CreatedAt)
+                .HasDatabaseName("ix_settlement_batches_not_uploaded")
+                .HasFilter("uploaded_at IS NULL");
+        });
+
         modelBuilder.Entity<IdempotencyRecord>(record =>
         {
             record.ToTable("idempotency_keys");
@@ -62,6 +76,14 @@ public sealed class PspDbContext(DbContextOptions<PspDbContext> options) : DbCon
             auth.HasIndex(a => a.Reference);
 
             auth.HasOne<CardAccount>().WithMany().HasForeignKey(a => a.CardFingerprint);
+            // Settlement (8.1): the batch that paid this charge out.
+            auth.Property(a => a.SettlementBatchId).HasMaxLength(40);
+            auth.HasOne<SettlementBatch>().WithMany().HasForeignKey(a => a.SettlementBatchId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // "Captured but not paid out yet": what every settlement run looks for.
+            auth.HasIndex(a => a.CapturedAt)
+                .HasDatabaseName("ix_authorizations_unsettled")
+                .HasFilter("status = 'Captured' AND settlement_batch_id IS NULL");
             // "Sum this card's live holds" runs on every authorization.
             auth.HasIndex(a => new { a.CardFingerprint, a.Status });
         });

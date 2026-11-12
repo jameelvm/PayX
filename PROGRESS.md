@@ -54,7 +54,7 @@ tracker*, *Current state* and
 
 ## Progress tracker
 
-**Overall: 49 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
+**Overall: 50 / 72 modules done.** Phase 10 and 11 counts are estimates and may change when we get there.
 
 Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phase in progress · ⬜ not started
 
@@ -68,7 +68,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 | 5 | [Risk](#phase-5-risk) | fraud detection, risk check, fallback | 7 / 7 | ✅ |
 | 6 | [Reliability](#phase-6-reliability) | transaction completion, transient failures | 6 / 6 | ✅ |
 | 7 | [Ledger + wallets](#phase-7-ledger--wallets) | wallet, ledger, history, balance | 7 / 7 | ✅ |
-| 8 | [Settlement + Reconciliation](#phase-8-settlement--reconciliation) | reconciliation system | 0 / 4 | ⬜ |
+| 8 | [Settlement + Reconciliation](#phase-8-settlement--reconciliation) | reconciliation system | 1 / 4 | 🔄 |
 | 9 | [Refunds + disputes](#phase-9-refunds--disputes) | dispute management | 0 / 3 | ⬜ |
 | 10 | [Frontend](#phase-10-frontend) | merchant's online store, mobile access | 0 / 5 | ⬜ |
 | 11 | [Evaluation](#phase-11-evaluation) | NFRs | 0 / 11 | ⬜ |
@@ -166,7 +166,7 @@ Legend: ✅ done and committed · 🔍 built, awaiting owner review · 🔄 phas
 
 | | Module | What it builds | Concept |
 |---|---|---|---|
-| ⬜ | 8.1 | PSP sim writes the end-of-day settlement file to S3 | settlement |
+| ✅ | 8.1 | PSP sim writes the end-of-day settlement file to S3 | settlement |
 | ⬜ | 8.2 | Recon reads and parses it | batch input |
 | ⬜ | 8.3 | Matching against the ledger | reconciliation |
 | ⬜ | 8.4 | Discrepancy classification + report | handling mismatches |
@@ -665,11 +665,38 @@ service boundaries and 17 proposed decisions are in `DESIGN.md` §1.
 
 ## Next up
 
-**Phase 8, Module 8.1 — the PSP simulator writes the end-of-day settlement
-file to S3** (`payx-settlement-files`). Then 8.2 parse it, 8.3 match it
-against the ledger, 8.4 classify discrepancies. Settlement is also what
-fills `MerchantAvailable` (pending → available), which 7.7's balance API
-already shows as 0.
+**Module 8.1 done (✅, 2026-11-12): approved by the owner and
+committed.** Tests: solution 312/312 (7 new). Live: $100 pay + capture on a
+fresh card → next run closed a batch with 1 charge and uploaded
+`settlements/2026-11-12/stl_….csv` with `capture,10000,320,9680,USD`.
+Documented (simple style): new `docs/SETTLEMENT.md` (8.1 section),
+RUNNING "Settlement (Phase 8)". README/DESIGN updates come at the end of
+Phase 8. Then 8.2: parse the file, 8.3: match it against the ledger, 8.4:
+classify mismatches.
+Settlement is also what fills `MerchantAvailable` (pending → available),
+which 7.7's balance API already shows as 0.
+
+**Owner request (2026-11-11): rewrite ALL docs in very simple language**
+(README, DESIGN, RUNNING, DEBUGGING, docs/*.md). Style: one-line plain
+definition first, one worked example ($100 payment) carried through,
+explain every term before using it, short sections. Do it at the end
+(after Phase 11 or when the owner asks). New docs written from now on
+should already follow this style.
+
+8.1 built (2026-11-11): PSP simulator settles. `Domain/SettlementBatch`
+(table `settlement_batches`) + `authorizations.settlement_batch_id`.
+`Services/Settler`: step 1, in one DB transaction (advisory lock 81001),
+create the batch and stamp every captured, unsettled charge up to the
+cutoff with its id in one UPDATE (so a charge is paid out once only; no
+batch when nothing waits); step 2, upload the CSV to S3
+(`settlements/<date>/<batch>.csv`), then set `uploaded_at`; a crash in
+between just re-uploads the same file next run (outbox idea again).
+`Services/SettlementFile`: CSV format + fee (2.9% + 30¢, basis points,
+integer maths, half up). `Jobs/SettlementJob`: every
+`Settlement:Interval` (2 min locally; 1 day for real). AWSSDK.S3 4.1.0,
+`ForcePathStyle` for LocalStack, compose `AWS__ServiceURL` + depends on
+localstack. New test project `PayX.PspSimulator.Tests` (7 tests). EF
+Relational pinned to 10.0.12, as in Ledger.
 
 **Phase 7 complete (2026-11-09): all seven modules committed; wrap-up done**
 — `docs/LEDGER.md` (model, diagrams, 13 scenarios, findings, repair query),
