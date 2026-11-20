@@ -17,6 +17,7 @@
     <Project Path="tests/PayX.Contracts.Tests/PayX.Contracts.Tests.csproj" />
     <Project Path="tests/PayX.Ledger.Tests/PayX.Ledger.Tests.csproj" />
     <Project Path="tests/PayX.Payment.Tests/PayX.Payment.Tests.csproj" />
+    <Project Path="tests/PayX.PspSimulator.Tests/PayX.PspSimulator.Tests.csproj" />
     <Project Path="tests/PayX.Risk.Tests/PayX.Risk.Tests.csproj" />
     <Project Path="tests/PayX.Vault.Tests/PayX.Vault.Tests.csproj" />
   </Folder>

@@ -289,9 +289,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # 8.1: writes the settlement file to S3.
+      localstack:
+        condition: service_healthy
     environment:
       <<: *service-env
       ConnectionStrings__Psp: "Host=postgres;Port=5432;Database=payx_psp;Username=payx_psp;Password=payx_psp_dev"
+      AWS__ServiceURL: "http://localstack:4566"
 
 volumes:
   payx-pgdata:

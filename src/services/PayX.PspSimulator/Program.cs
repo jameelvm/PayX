@@ -1,4 +1,6 @@
+using Amazon.S3;
 using Microsoft.EntityFrameworkCore;
+using PayX.PspSimulator.Jobs;
 using PayX.PspSimulator.Repositories;
 using PayX.PspSimulator.Services;
 using PayX.ServiceDefaults;
@@ -18,6 +20,12 @@ builder.Services.AddDbContext<PspDbContext>(options => options
     .UseSnakeCaseNamingConvention());
 builder.Services.AddScoped<Authorizer>();
 builder.Services.AddScoped<AuthorizationActions>();
+
+// Settlement (8.1): every "day" (minutes, locally), pay out the captured
+// charges and drop the settlement file in S3 for PayX to reconcile.
+builder.AddAwsClient<IAmazonS3>();
+builder.Services.AddScoped<Settler>();
+builder.Services.AddHostedService<SettlementJob>();
 
 var app = builder.Build();
 
